@@ -8,6 +8,7 @@
   URL パラメータ:
     side=both|me|opp   表示するパーティ (既定 both)
     layout=column      縦一列に並べる (画面の左右端に置く用。既定は横並び)
+    arrange=row        自分と相手のパーティを左右に並べる (自分が左端・相手が右端。既定は上下)
     size=80            画像の大きさ (px)
     names=0            名前を非表示
     label=0            「自分」「相手」の見出しを非表示
@@ -36,6 +37,7 @@
   body { font-family: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif; color: var(--fg); zoom: var(--scale); }
   #root { display: flex; flex-direction: column; gap: 10px; padding: 8px; align-items: flex-start; }
   #root.column { flex-direction: row; align-items: flex-start; }
+  #root.split { flex-direction: row; justify-content: space-between; align-items: flex-start; }
   .party { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35); }
   .title { font-size: 13px; font-weight: 800; letter-spacing: 0.15em; margin: 0 2px 6px; }
   .me .title { color: var(--me); }
@@ -65,6 +67,7 @@
   const side = q.get("side") || "both";
   const root = document.getElementById("root");
   if (q.get("layout") === "column") root.classList.add("column");
+  if (q.get("arrange") === "row") root.classList.add("split");
   if (q.get("names") === "0") root.classList.add("hide-names");
   if (q.get("size")) document.documentElement.style.setProperty("--size", parseInt(q.get("size"), 10) + "px");
   if (q.get("scale")) document.documentElement.style.setProperty("--scale", q.get("scale"));
