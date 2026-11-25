@@ -317,3 +317,16 @@ def format_spread(spread: str) -> str:
     if len(vals) != 6:
         return spread
     return " ".join(f"{STAT_LABELS[i]}{v}" for i, v in enumerate(vals) if v) or "なし"
+
+
+def nature_list_ja():
+    """性格の日本語名一覧 (補正の表記つき)。手入力の候補に使う。"""
+    out = []
+    for en in load_names().get("natures", {}):
+        n = nature_info(en)
+        out.append({"name": n["name"], "up": n["up"], "down": n["down"]})
+    return sorted(out, key=lambda n: (n["up"] or "Z", n["down"] or "Z"))
+
+
+def nature_by_ja(name: str):
+    return next((n for n in nature_list_ja() if n["name"] == name), None)

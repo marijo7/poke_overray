@@ -9,7 +9,8 @@
     slot=opp1          表示する領域 ID (カンマ区切りで複数可。省略時は相手側の領域すべて)
     sprite=0           ポケモンの画像を非表示
     stats=0            種族値を非表示
-    nature=0           性格 (最も多い型) を非表示
+    nature=0           性格を非表示
+    natures=3          性格の表示件数 (手入力した採用率がある場合)
     moves=6 items=3 abilities=2   表示件数 (0 で非表示)
     layout=row         カードを横並びにする (既定は縦並び)
     history=1          この対戦で見た相手の一覧を表示
@@ -92,6 +93,7 @@
     sprite: q.get("sprite") !== "0",
     stats: q.get("stats") !== "0",
     nature: q.get("nature") !== "0",
+    natureCount: +(q.get("natures") ?? 3),
   };
   const LABELS = ["H", "A", "B", "C", "D", "S"];
 
@@ -103,7 +105,7 @@
 
   function natureBlock(p) {
     if (!opt.nature) return "";
-    if (p.natures && p.natures.length) return section("性格", p.natures, 3);  // 性格の採用率 (手入力等) があれば一覧
+    if (p.natures && p.natures.length) return section("性格", p.natures, opt.natureCount);  // 手入力した性格の採用率
     const b = p.top_build;
     if (!b) return "";
     const n = b.nature ? `${esc(b.nature.name)}${b.nature.up ? `<span class="sub"> (${b.nature.up}↑${b.nature.down}↓)</span>` : ""}` : "性格不明";
@@ -155,7 +157,7 @@
     try {
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
       const slots = st.slots.filter((s) => s.species && (opt.slots ? opt.slots.includes(s.id) : s.side === "opp"));
-      const sig = JSON.stringify([slots.map((s) => [s.id, s.display, s.sprite, s.mega, s.pokemon && s.pokemon.key]), st.history, st.usage_meta]);
+      const sig = JSON.stringify([slots.map((s) => [s.id, s.display, s.sprite, s.mega, s.pokemon && s.pokemon.key, s.pokemon && s.pokemon.natures]), st.history, st.usage_meta]);
       if (sig !== lastSig) {
         lastSig = sig;
         document.getElementById("cards").innerHTML = slots.map((s) => card(s, st.usage_meta)).join("");

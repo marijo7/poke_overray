@@ -116,6 +116,14 @@
       <p class="hint">「顔」は対戦中の名前の横の画像で、メガシンカの判定に使います。間違えて登録したものは × で削除できます。</p>
     </div>
     <div class="panel">
+      <h2>性格の採用率 (手入力)</h2>
+      <div class="row" id="natquick"></div>
+      <div class="row" style="margin-top:6px"><input list="usagelist" id="natpoke" placeholder="ポケモン (採用率データにあるもの)" style="flex:1;min-width:0"></div>
+      <table id="natrows" style="margin-top:6px"></table>
+      <div class="row" style="margin-top:8px"><button class="primary" id="natsave">保存</button><span id="natsaved" class="hint"></span></div>
+      <p class="hint">ゲーム内の「バトルデータ」などを見て入力すると、カードに性格の採用率が出ます。採用率データの更新では消えません (data/natures.json に保存)。全部空にして保存すると削除。</p>
+    </div>
+    <div class="panel">
       <h2>OBS への追加</h2>
       <p class="hint" style="margin-top:0">ソース追加 → ブラウザ → URL に以下を入力。幅 340 / 高さ 1080 程度。</p>
       <p><code id="url"></code></p>
@@ -127,6 +135,8 @@
   </section>
 </main>
 <datalist id="pokelist"></datalist>
+<datalist id="usagelist"></datalist>
+<datalist id="naturelist"></datalist>
 <script>
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -256,13 +266,51 @@
     if (e.target.dataset.clear) { await post("/api/slot", { id: e.target.dataset.clear }); lastSig = ""; }
   });
   $("reset").onclick = () => post("/api/reset");
-  $("reload").onclick = async () => { const r = await post("/api/reload_usage"); alert(r.ok ? `再読込しました (${r.count} 匹)` : "data/usage.json がありません"); loadPokemon(); };
+  $("reload").onclick = async () => { const r = await post("/api/reload_usage"); alert(r.ok ? `再読込しました (${r.count} 匹)` : "data/usage.json がありません"); loadPokemon(); loadNatures(); };
   $("pause").onclick = async () => { const r = await post("/api/pause", { paused: $("pause").dataset.p !== "1" }); };
 
   async function loadPokemon() {
     const names = await (await fetch("/api/names")).json();
     $("pokelist").innerHTML = names.map((n) => `<option value="${esc(n)}">`).join("");
   }
+
+  // ---- 性格 (手入力) ----
+  let usageList = [], natData = {}, natKey = null;
+  async function loadNatures() {
+    usageList = await (await fetch("/api/pokemon")).json();
+    $("usagelist").innerHTML = usageList.map((p) => `<option value="${esc(p.display)}">`).join("");
+    const r = await (await fetch("/api/natures")).json();
+    natData = r.data;
+    $("naturelist").innerHTML = r.natures.map((n) => `<option value="${esc(n.name)}" label="${n.up ? n.up + "↑" + n.down + "↓" : "補正なし"}">`).join("");
+  }
+  function selectNaturePoke(key) {
+    natKey = key;
+    const p = usageList.find((x) => x.key === key);
+    $("natpoke").value = p ? p.display : "";
+    const rows = (natData[key] || []).concat(Array(5).fill({ name: "", pct: "" })).slice(0, 5);
+    $("natrows").innerHTML = rows.map((r, i) => `<tr>
+      <td><input list="naturelist" placeholder="性格" value="${esc(r.name)}" data-n="${i}"></td>
+      <td style="white-space:nowrap"><input type="number" min="0" max="100" step="0.1" placeholder="%" value="${r.pct}" style="width:80px" data-np="${i}"> %</td></tr>`).join("");
+  }
+  $("natpoke").addEventListener("change", (e) => {
+    const p = usageList.find((x) => x.display === e.target.value.trim());
+    if (p) selectNaturePoke(p.key); else { $("natsaved").textContent = "採用率データに無いポケモンです"; }
+  });
+  $("natquick").addEventListener("click", (e) => { if (e.target.dataset.nk) selectNaturePoke(e.target.dataset.nk); });
+  function renderNatQuick(slots) {  // 場に出ているポケモンをすぐ選べるボタン
+    const on = slots.filter((s) => s.pokemon);
+    $("natquick").innerHTML = on.length ? on.map((s) => `<button data-nk="${esc(s.pokemon.key)}">${esc(s.pokemon.display)}</button>`).join("") : "";
+  }
+  $("natsave").onclick = async () => {
+    if (!natKey) { $("natsaved").textContent = "ポケモンを選んでください"; return; }
+    const natures = [...Array(5).keys()].map((i) => ({
+      name: $("natrows").querySelector(`[data-n="${i}"]`).value.trim(),
+      pct: parseFloat($("natrows").querySelector(`[data-np="${i}"]`).value) || 0 })).filter((n) => n.name);
+    const r = await post("/api/natures", { key: natKey, natures });
+    if (r.ok) { natData[natKey] = r.natures; selectNaturePoke(natKey); $("natsaved").textContent = `保存しました (${r.natures.length} 件)`; }
+    else $("natsaved").textContent = "失敗: " + r.error;
+    setTimeout(() => ($("natsaved").textContent = ""), 2500);
+  };
 
   // ---- パーティ ----
   let myLoaded = false, oppParty = [];
@@ -329,7 +377,7 @@
       $("pause").textContent = s.paused ? "認識を再開" : "認識を一時停止";
       // 入力中は再描画しない
       const sig = JSON.stringify(st.slots);
-      if (sig !== lastSig && !$("slots").contains(document.activeElement)) { lastSig = sig; renderSlots(st); }
+      if (sig !== lastSig && !$("slots").contains(document.activeElement)) { lastSig = sig; renderSlots(st); renderNatQuick(st.slots); }
       if (!myLoaded) { renderMyParty(st.parties.me); myLoaded = true; }
       const oppSig = JSON.stringify(st.parties.opp);
       if (oppSig !== lastOpp && !$("oppparty").contains(document.activeElement)) { lastOpp = oppSig; renderOppParty(st.parties.opp); loadIcons(); }
@@ -344,7 +392,7 @@
 
   (async () => {
     const cfg = await (await fetch("/api/config")).json();
-    regions = cfg.regions; preview = cfg.preview; renderRegions(); loadIcons(); loadPokemon(); tick();
+    regions = cfg.regions; preview = cfg.preview; renderRegions(); loadIcons(); loadPokemon(); loadNatures(); tick();
   })();
 </script>
 </body>

@@ -105,6 +105,9 @@ def make_handler(app: App):
                         seen.add(n)
                         out.append(n)
                 return self._json(out)
+            if path == "/api/natures":  # 性格の手入力: 候補一覧と、入力済みの内容
+                from .names import nature_list_ja
+                return self._json({"natures": nature_list_ja(), "data": app.usage.manual_natures})
             if path == "/api/icons":
                 from .names import resolve
                 out = []
@@ -195,6 +198,13 @@ def make_handler(app: App):
                     app.cfg["my_party"] = app.state.parties["me"]
                     save_config(app.cfg)
                 return self._json({"ok": True})
+            if path == "/api/natures":
+                key = str(body.get("key", ""))
+                if app.usage.get(key) is None:
+                    return self._json({"error": "採用率データに無いポケモンです"}, 400)
+                saved = app.usage.set_natures(key, body.get("natures") or [])
+                app.state.version += 1
+                return self._json({"ok": True, "natures": saved})
             if path == "/api/icon_label":
                 key = app.state.label_icon(str(body.get("uid", "")), str(body.get("name", "")).strip())
                 return self._json({"ok": bool(key), "key": key})
