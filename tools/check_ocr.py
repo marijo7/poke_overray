@@ -22,6 +22,16 @@ def sample():
     return im
 
 
+def report(ocr, label):
+    """実際の認識と同じ前処理 (拡大) をして読み取り、ポケモン名の判定結果まで表示する。"""
+    from overlay.names import NameMatcher
+    from overlay.ocr import preprocess
+    texts = ocr.recognize(preprocess(sample(), getattr(ocr, "default_scale", 2.0)))
+    name, score = NameMatcher().match(" ".join(texts)) if texts else (None, 0)
+    ok = "OK" if name == "ガブリアス" else "NG"
+    print(f"  {label}: 読み取り {texts} → 判定 {name} ({score:.2f}) [{ok}]")
+
+
 def main():
     from overlay.ocr import RapidOcr, WindowsOcr
 
@@ -30,8 +40,7 @@ def main():
         from winrt.windows.media.ocr import OcrEngine
         langs = [lang.language_tag for lang in OcrEngine.available_recognizer_languages]
         print("  使える言語:", ", ".join(langs) or "(なし)")
-        text = WindowsOcr("ja").recognize(sample())
-        print("  日本語: 使えます。テスト画像の読み取り結果:", text)
+        report(WindowsOcr("ja"), "日本語: 使えます")
     except ImportError:
         print("  winrt パッケージが入っていません (setup.bat を実行してください)")
     except Exception as e:
@@ -41,7 +50,7 @@ def main():
     print("== RapidOCR")
     try:
         ocr = RapidOcr("cpu")
-        print(f"  使えます ({ocr.name})。テスト画像の読み取り結果:", ocr.recognize(sample()))
+        report(ocr, f"使えます ({ocr.name})")
     except Exception as e:
         print("  使えません ->", e)
 

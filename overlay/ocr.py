@@ -13,6 +13,18 @@ def preprocess(img: Image.Image, scale: float) -> Image.Image:
     return img
 
 
+def pad(img: Image.Image, ratio: float = 0.35) -> Image.Image:
+    """画像の周りに、背景色 (四隅の色の中央値) の余白を足す。"""
+    img = img.convert("RGB")
+    w, h = img.size
+    m = max(4, int(h * ratio))
+    corners = [img.getpixel(p) for p in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))]
+    bg = tuple(sorted(c[i] for c in corners)[1] for i in range(3))
+    out = Image.new("RGB", (w + 2 * m, h + 2 * m), bg)
+    out.paste(img, (m, m))
+    return out
+
+
 class WindowsOcr:
     """Windows 10/11 標準の OCR (Windows.Media.Ocr)。日本語の言語パックが必要。"""
 
@@ -35,6 +47,7 @@ class WindowsOcr:
         self.loop = asyncio.new_event_loop()
 
     def recognize(self, img: Image.Image):
+        img = pad(img)  # 端に接した文字 (先頭の 1 文字など) を読み落とすことがあるため、周りに余白を足す
         r, g, b, a = img.convert("RGBA").split()
         raw = Image.merge("RGBA", (b, g, r, a)).tobytes()
         w = self._DataWriter()
