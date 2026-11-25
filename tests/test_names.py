@@ -108,6 +108,6 @@ class TestStatsNature(unittest.TestCase):
               "This configuration accounts for 33.040% of competitive builds.")
         b = parse_top_build(md)
         self.assertEqual((b["nature"]["name"], b["spread_text"], b["pct"]), ("ようき", "H2 A32 S32", 33.04))
-        hidden = parse_top_build(md.replace("**Jolly**", "********"))
+        hidden = parse_top_build(md.replace("**Jolly**", "****"))  # 実データの伏せ字の形
         self.assertIsNone(hidden["nature"])  # 性格が伏せられているフォーマット
         self.assertIsNone(parse_top_build("No EV spread or nature data available."))
