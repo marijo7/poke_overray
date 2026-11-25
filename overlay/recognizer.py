@@ -2,6 +2,8 @@
 import io
 import logging
 import os
+
+import numpy as np
 import threading
 import time
 
@@ -11,7 +13,7 @@ from .icons import ICON_DIR, IconDB, crop_with_margin
 from .gender import crop as crop_rect
 from .gender import detect_gender
 from .names import (NameMatcher, base_stats, form_abilities_ja, gender_variant, is_mega, mega_forms, normalize,
-                    resolve)
+                    resolve, type_name_ja, types_of)
 from .nicknames import NicknameDB, clean_nick, looks_like_name, nick_key
 from .ocr import create_ocr, preprocess
 
@@ -29,6 +31,9 @@ class State:
         self.unknown_nicks = {}  # nick_key -> {"nick", "side"}: 何のポケモンか分からないニックネーム
         self.icons = icons     # IconDB (選出画面のアイコン照合)
         self.icon_crops = {}   # 未登録アイコンの切り出し画像 uid -> PIL.Image
+        self.type_crops = {}   # uid -> ((左のタイプ 余白付き, 余白なし), (右のタイプ 余白付き, 余白なし))
+        self.type_db = IconDB(ICON_DIR.parent / "types") if icons is not None else None  # タイプアイコン (学習)
+        self.icon_guess = {}   # uid -> {"types": [...], "cands": [...], "guess": キー or None}: タイプからの推定
         self.lock = threading.Lock()
         self.slots = {}        # region id -> {"ident", "species", "side", "source", "updated"}
         # パーティ (識別子 = 採用率データのキー or 日本語名)。自分は config に保存、相手は対戦ごとにリセット
@@ -76,6 +81,11 @@ class State:
                         if self._resolve(m)["species"] == info["species"]:
                             mine[i] = info["key"]
                 party = self.parties["opp"]
+                if side == "opp":  # タイプから推定したポケモンが実際に出てきたら、そのアイコンとして覚える
+                    for uid, g in list(self.icon_guess.items()):
+                        if g.get("guess") and self._resolve(g["guess"])["species"] == info["species"]:
+                            self._label_icon_locked(uid, g["guess"])
+                            log.info("推定が当たったのでアイコンを登録: %s", info["display"])
                 if side == "opp" and all(self._resolve(m)["species"] != info["species"] for m in party):
                     unknown = [m for m in party if m.startswith("icon:")]
                     if len(party) >= self.PARTY_SIZE and len(unknown) == 1:
@@ -86,10 +96,30 @@ class State:
                         party.append(info["key"])
             self.version += 1
 
+    def learn_types(self, uid, key):
+        """名前の分かったアイコンの横のタイプアイコンを、そのタイプの見た目として覚える (1 タイプ 3 枚まで)。"""
+        crops, types = self.type_crops.get(uid), types_of(key, self.usage)
+        if not crops or not types or self.type_db is None:
+            return
+        # 2 タイプなら左=1 つ目・右=2 つ目、1 タイプなら右だけに出る
+        pairs = list(zip(crops, types)) if len(types) == 2 else [(crops[1], types[0])]
+        for (outer, inner), t in pairs:
+            n = sum(1 for it in self.type_db.list() if it["key"] == t)
+            if n >= 3:
+                continue
+            if n:
+                _, score = self.type_db.match(outer, keys={t})
+                if score >= 0.92:
+                    continue  # もう同じ見た目を覚えている
+            self.type_db.add(inner, t)
+            log.info("タイプアイコンを記憶: %s", type_name_ja(t))
+
     def _label_icon_locked(self, uid, key):
         crop = self.icon_crops.get(uid)
         if crop is not None and self.icons is not None:
             self.icons.add(crop, key)
+        self.learn_types(uid, key)
+        self.icon_guess.pop(uid, None)
         self.parties["opp"] = [key if m == "icon:" + uid else m for m in self.parties["opp"]]
 
     def add_unknown_nick(self, nick, side):
@@ -149,6 +179,8 @@ class State:
             self.parties["opp"].clear()
             self.parties["me"] = list(self.base_my)  # メガシンカ表示を元に戻す
             self.icon_crops.clear()
+            self.type_crops.clear()
+            self.icon_guess.clear()
             self.version += 1
 
     def snapshot(self, regions):
@@ -172,12 +204,19 @@ class State:
                     "debug": self.debug.get(r["id"]),
                 })
             parties = {}
+            guessed = {g["guess"] for g in self.icon_guess.values() if g.get("guess")}
             for side, members in self.parties.items():
                 active = {s["species"] for s in self.slots.values() if s["side"] == side}
-                parties[side] = [dict(self._resolve(m), active=self._resolve(m)["species"] in active)
+                parties[side] = [dict(self._resolve(m), active=self._resolve(m)["species"] in active,
+                                      guess=side == "opp" and m in guessed)
                                  for m in members]
+            guesses = {uid: {"types": [type_name_ja(t) for t in g["types"]],
+                             "cands": [{"key": c, "display": self._resolve(c)["display"]} for c in g["cands"][:6]],
+                             "guess": g.get("guess")}
+                       for uid, g in self.icon_guess.items()}
             unknown = [dict(v) for v in self.unknown_nicks.values()]
             return {"version": self.version, "slots": slots, "parties": parties, "unknown_nicks": unknown,
+                    "icon_guesses": guesses,
                     "history": parties["opp"],  # 旧形式との互換
                     "status": dict(self.status), "perf": dict(self.perf), "usage_meta": self.usage.meta}
 
@@ -282,15 +321,26 @@ class Recognizer(threading.Thread):
             outer, inner = crop_with_margin(frame, _lerp(pv["opp_first"], pv["opp_last"], i, n))
             uid = f"b{self.battle_no}_{i}"
             self.state.icon_crops[uid] = inner
+            if pv.get("opp_type1_first"):
+                self.state.type_crops[uid] = tuple(
+                    crop_with_margin(frame, _lerp(pv[f"opp_type{k}_first"], pv[f"opp_type{k}_last"], i, n))
+                    for k in (1, 2))
             cur = self.preview_opp[i]
-            if cur and not cur.startswith("icon:"):
+            if cur and not cur.startswith("icon:") and uid not in self.state.icon_guess:
                 continue  # 特定済み
             key, score = self.state.icons.match(outer) if self.state.icons else (None, 0.0)
             self.state.debug[f"icon{i}"] = {"match": key, "score": round(score, 3)}
             if key and score >= thr and pv.get("opp_gender_first"):
                 g = detect_gender(crop_rect(frame, _lerp(pv["opp_gender_first"], pv["opp_gender_last"], i, n)))
                 key = gender_variant(resolve(key, self.state.usage)["species"], g, self.state.usage) or key
-            self.preview_opp[i] = key if key and score >= thr else "icon:" + uid
+            if key and score >= thr:
+                self.preview_opp[i] = key
+                self.state.icon_guess.pop(uid, None)
+                self.state.learn_types(uid, key)
+            elif uid in self.state.icon_guess:
+                pass  # 推定済み (毎フレーム推定し直さない)
+            else:
+                self.preview_opp[i] = self.guess_by_types(frame, pv, i, n, uid) or "icon:" + uid
         opp = [m for m in self.preview_opp if m]
         if opp != self.state.parties["opp"]:
             # 手動で名前を付けた分 (icon: → キー) は残す
@@ -328,6 +378,47 @@ class Recognizer(threading.Thread):
                 self.state.set_party("me", mine)
                 cfg["my_party"] = mine
                 save_config(cfg)
+
+    def read_types(self, uid):
+        """タイプアイコン 2 つを、覚えたタイプアイコンと照合する。戻り値: タイプのリスト (読めなければ None)"""
+        crops, db = self.state.type_crops.get(uid), self.state.type_db
+        if not crops or db is None or not db.items:
+            return None
+
+        def is_empty(img):  # 1 タイプのポケモンの左側は何も無い (白い模様が無い)
+            a = np.asarray(img.convert("RGB"), dtype=np.int16)
+            return (a.min(axis=2) > 200).mean() < 0.03
+
+        types = []
+        for outer, inner in ([crops[1]] if is_empty(crops[0][1]) else crops):
+            t, score = db.match(outer)
+            if not t or score < 0.85:
+                return None  # まだ覚えていないタイプ
+            types.append(t)
+        return types
+
+    def guess_by_types(self, frame, pv, i, n, uid):
+        """未登録アイコンを、横のタイプアイコンから推定する。候補が 1 匹ならそのポケモン、複数なら候補を出す。"""
+        types = self.read_types(uid)
+        if not types:
+            return None
+        taken = {resolve(m, self.state.usage)["species"] for m in self.preview_opp if m and not m.startswith("icon:")}
+        cands = []
+        for key in self.state.usage.roster():
+            if types_of(key, self.state.usage) == types:
+                sp = resolve(key, self.state.usage)["species"]
+                if sp not in taken and sp not in {resolve(c, self.state.usage)["species"] for c in cands}:
+                    cands.append(key)
+        g = (detect_gender(crop_rect(frame, _lerp(pv["opp_gender_first"], pv["opp_gender_last"], i, n)))
+             if pv.get("opp_gender_first") else None)
+        guess = None
+        if len(cands) == 1:
+            sp = resolve(cands[0], self.state.usage)["species"]
+            guess = gender_variant(sp, g, self.state.usage) or cands[0]
+        self.state.icon_guess[uid] = {"types": types, "cands": cands, "guess": guess}
+        log.info("相手%d: タイプ %s → 候補 %s", i + 1, "/".join(type_name_ja(t) for t in types),
+                 "、".join(resolve(c, self.state.usage)["display"] for c in cands[:5]) or "なし")
+        return guess
 
     def process_battle(self, frame, cfg, scale):
         self.state.status["screen"] = "対戦"

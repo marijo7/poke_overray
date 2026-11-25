@@ -127,7 +127,7 @@ def cbd_entry(fmt, rank, item):
 
 def fetch_cbd(fmt, limit, delay):
     fmt = {"doubles": "Doubles", "singles": "Singles"}.get(fmt.lower(), "Doubles")
-    rk = get_json(f"{CBD_API}/rankings?format={fmt}&limit={limit}")
+    rk = get_json(f"{CBD_API}/rankings?format={fmt}")  # 全ポケモンの順位 (候補の絞り込みに使う)
     result = []
     for item in rk.get("rankings", [])[:limit]:
         time.sleep(delay)
@@ -145,6 +145,8 @@ def fetch_cbd(fmt, limit, delay):
         "url": "https://championsbattledata.com/",
         "format": fmt + (f" {seasons[0]}" if seasons else ""),  # seasons は新しい順 (Current, M7, M6, ...)
         "data_date": (rk.get("generatedAt") or "")[:10] or None,
+        # 対戦で使える全ポケモン (使用率順)。選出画面のタイプからポケモンを絞り込むときの候補
+        "roster": [r.get("battleName") or r["name"] for r in rk.get("rankings", [])],
     }
     return result, meta
 

@@ -1,0 +1,92 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
+from overlay.icons import IconDB
+from overlay.names import types_of
+from overlay.recognizer import Recognizer, State
+from overlay.usage import UsageDB
+
+COLORS = {"fighting": (240, 120, 20), "poison": (140, 60, 190), "dragon": (60, 90, 220), "ground": (150, 90, 40),
+          "fire": (230, 40, 40), "flying": (130, 180, 240)}
+
+
+def type_icon(t, empty=False):
+    """色と模様がタイプごとに違う、タイプアイコン風の画像 (余白付き / 余白なし)"""
+    inner = Image.new("RGB", (40, 40), (150, 20, 60))
+    if not empty:
+        d = ImageDraw.Draw(inner)
+        d.rounded_rectangle((2, 2, 38, 38), 6, fill=COLORS[t])
+        k = list(COLORS).index(t)
+        d.polygon([(8 + k * 3, 30), (20, 6 + k * 2), (32 - k, 30)], fill="white")
+        d.ellipse((14, 14 + k, 26, 26 + k), outline="white", width=3)
+    outer = Image.new("RGB", (48, 48), (150, 20, 60))
+    outer.paste(inner, (4, 4))
+    return outer, inner
+
+
+def usage():
+    f = Path(tempfile.mkdtemp()) / "usage.json"
+    base = {"moves": [], "items": [], "abilities": []}
+    f.write_text(json.dumps({"meta": {"roster": ["Sneasler", "Garchomp", "Charizard", "Talonflame", "Rillaboom"]},
+                             "pokemon": [{"key": "Garchomp", "display": "ガブリアス", "species": "ガブリアス",
+                                          "rank": 3, **base}]}, ensure_ascii=False), encoding="utf-8")
+    return UsageDB(f)
+
+
+class TestTypes(unittest.TestCase):
+    def setUp(self):
+        d = Path(tempfile.mkdtemp())
+        self.state = State(usage(), icons=IconDB(d / "icons"))
+        self.state.type_db = IconDB(d / "types")
+        self.rec = Recognizer(self.state, lambda: {"preview": {}})
+
+    def test_learn_and_guess(self):
+        st = self.state
+        self.assertEqual(types_of("Sneasler"), ["fighting", "poison"])
+        # 1 回目: 名前の分かったアイコンからタイプを覚える
+        st.type_crops = {"a": (type_icon("fighting"), type_icon("poison")),
+                         "b": (type_icon("dragon"), type_icon("ground")),
+                         "c": (type_icon("fire"), type_icon("flying"))}
+        for uid, key in (("a", "Sneasler"), ("b", "Garchomp"), ("c", "Charizard")):
+            st.learn_types(uid, key)
+        self.assertEqual(len(st.type_db.items), 6)
+        # 2 回目: タイプを読んで候補を出す
+        st.type_crops = {"x": (type_icon("dragon"), type_icon("ground")),
+                         "y": (type_icon("fire"), type_icon("flying"))}
+        self.rec.preview_opp = ["icon:x", "icon:y"]
+        self.assertEqual(self.rec.read_types("x"), ["dragon", "ground"])
+        self.assertEqual(self.rec.guess_by_types(None, {}, 0, 2, "x"), "Garchomp")    # 候補 1 匹 → 推定
+        self.assertIsNone(self.rec.guess_by_types(None, {}, 1, 2, "y"))                 # 候補 2 匹 → 候補だけ
+        self.assertEqual(st.icon_guess["y"]["cands"], ["Charizard", "Talonflame"])
+
+    def test_single_type_is_on_the_right(self):
+        st = self.state
+        st.type_crops = {"a": (type_icon("fire"), type_icon("flying"))}
+        st.learn_types("a", "Charizard")
+        st.type_crops["g"] = (type_icon("fire", empty=True), type_icon("fire"))  # 1 タイプ: 左は空
+        self.assertEqual(self.rec.read_types("g"), ["fire"])
+
+    def test_unknown_type_returns_none(self):
+        st = self.state
+        st.type_crops = {"a": (type_icon("fire"), type_icon("flying"))}
+        st.learn_types("a", "Charizard")
+        st.type_crops["z"] = (type_icon("dragon"), type_icon("ground"))  # まだ覚えていないタイプ
+        self.assertIsNone(self.rec.read_types("z"))
+
+    def test_guess_confirmed_when_it_appears(self):
+        st = self.state
+        st.icon_crops["x"] = type_icon("dragon")[1]
+        st.type_crops = {"x": (type_icon("dragon"), type_icon("ground"))}
+        st.icon_guess["x"] = {"types": ["dragon", "ground"], "cands": ["Garchomp"], "guess": "Garchomp"}
+        st.set_party("opp", ["Garchomp"])
+        st.set_slot("opp1", ident="ガブリアス", side="opp")
+        self.assertEqual([it["key"] for it in st.icons.list()], ["Garchomp"])  # 出てきたのでアイコンとして覚えた
+        self.assertNotIn("x", st.icon_guess)
+
+
+if __name__ == "__main__":
+    unittest.main()

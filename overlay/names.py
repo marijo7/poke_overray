@@ -372,3 +372,17 @@ def gender_variant(species_ja: str, gender, usage_db=None):
         return female[0]["key"]
     male = [e for e in cands if not e["key"].endswith("-F") and "-Mega" not in e["key"]]
     return male[0]["key"] if male else female[0]["key"].rsplit("-F", 1)[0]
+
+
+# ---- タイプ ----
+
+def types_of(key: str, usage_db=None):
+    """ポケモン (キー / 日本語名) → タイプ (英語の識別子、PokeAPI の順番)。"""
+    info = resolve(key, usage_db)
+    if not info or not info.get("sprite"):
+        return []
+    return load_names().get("types", {}).get(str(info["sprite"]), [])
+
+
+def type_name_ja(t: str) -> str:
+    return load_names().get("type_names", {}).get(t, t)

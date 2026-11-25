@@ -52,6 +52,9 @@
   .chip.unknown { border-style: dashed; padding-right: 6px; }
   .chip.unknown img { width: 40px; height: 40px; border-radius: 4px; }
   .chip.unknown input { width: 120px; }
+  .chip.unknown { flex-wrap: wrap; }
+  .chip .cands { flex-basis: 100%; font-size: 12px; color: var(--sub); padding: 2px 4px; }
+  .chip .cands button { font-size: 12px; padding: 1px 8px; margin: 2px 2px 0 0; border: 1px solid var(--accent); border-radius: 999px; background: var(--panel); color: var(--accent); }
   .fontpreview { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: rgba(16, 18, 28, 0.9); color: #f4f6fb; }
   .fontpreview .fp-name { font-size: 22px; font-weight: 800; border-bottom: 2px solid #ffcc33; margin-bottom: 6px; }
   .fontpreview .fp-row { display: flex; justify-content: space-between; font-size: 15px; line-height: 22px; padding: 0 6px; margin: 2px 0; border-radius: 4px; background: rgba(79, 140, 255, 0.45); }
@@ -115,7 +118,7 @@
       <h2>相手のパーティ</h2>
       <div class="chips" id="oppparty"></div>
       <div class="ctl row" style="margin-top:8px"><input list="pokelist" id="oppadd" placeholder="追加 (名前を入力して Enter)" style="flex:1;min-width:0"></div>
-      <p class="hint">選出画面のアイコンから自動で入ります。<b>?</b> のアイコンは未登録なので、名前を入れて登録すると次回から自動で認識します。対戦中に名前を読み取った相手も追加されます。</p>
+      <p class="hint">選出画面のアイコンから自動で入ります。未登録のアイコンは名前を入れるか、タイプから絞った候補のボタンを押すと登録され、次回から自動で認識します。候補が 1 匹だけなら自動で入り「推定」と表示されます。対戦中に名前を読み取った相手も追加されます。</p>
     </div>
     <div class="panel">
       <h2>ニックネーム</h2>
@@ -471,16 +474,28 @@
     $("mysaved").textContent = r.ok ? "保存しました" : "失敗: " + r.error;
     setTimeout(() => ($("mysaved").textContent = ""), 2000);
   };
-  function renderOppParty(members) {
+  function renderOppParty(members, guesses) {
+    guesses = guesses || {};
     oppParty = members.map((m) => m.key);
-    $("oppparty").innerHTML = members.length ? members.map((m, i) => m.icon
-      ? `<span class="chip unknown"><img src="/api/icon/${esc(m.icon)}.png" alt="">
-          <input list="pokelist" placeholder="名前を入れて登録" data-label="${esc(m.icon)}"><button data-rm="${i}" title="削除">×</button></span>`
-      : `<span class="chip${m.active ? " active" : ""}">
+    $("oppparty").innerHTML = members.length ? members.map((m, i) => {
+      if (m.icon) {  // 未登録アイコン: タイプから絞り込んだ候補をボタンで出す
+        const g = guesses[m.icon];
+        const cands = g && g.cands.length ? `<div class="cands">${esc(g.types.join("/"))}: ${g.cands.map((c) =>
+          `<button data-label-uid="${esc(m.icon)}" data-label-name="${esc(c.key)}">${esc(c.display)}</button>`).join("")}</div>` : "";
+        return `<span class="chip unknown"><img src="/api/icon/${esc(m.icon)}.png" alt="">
+          <input list="pokelist" placeholder="名前を入れて登録" data-label="${esc(m.icon)}"><button data-rm="${i}" title="削除">×</button>${cands}</span>`;
+      }
+      return `<span class="chip${m.active ? " active" : ""}">
       ${m.sprite ? `<img src="/sprite/${m.sprite}.png" alt="" onerror="this.remove()">` : ""}${esc(m.display)}
-      <button data-rm="${i}" title="削除">×</button></span>`).join("") : '<span class="hint">まだありません</span>';
+      ${m.guess ? '<span class="tag" title="タイプから推定。対戦に出てきたら確定して、アイコンを覚えます">推定</span>' : ""}
+      <button data-rm="${i}" title="削除">×</button></span>`;
+    }).join("") : '<span class="hint">まだありません</span>';
   }
-  $("oppparty").addEventListener("click", (e) => {
+  $("oppparty").addEventListener("click", async (e) => {
+    if (e.target.dataset.labelUid) {  // 候補ボタン
+      await post("/api/icon_label", { uid: e.target.dataset.labelUid, name: e.target.dataset.labelName });
+      loadIcons(); return;
+    }
     if (e.target.dataset.rm === undefined) return;
     const members = oppParty.filter((_, i) => i !== +e.target.dataset.rm);
     post("/api/party", { side: "opp", members });
@@ -528,7 +543,8 @@
       if (!myLoaded) { renderMyParty(st.parties.me); myLoaded = true; }
       renderUnknownNicks(st.unknown_nicks || []);
       const oppSig = JSON.stringify(st.parties.opp);
-      if (oppSig !== lastOpp && !$("oppparty").contains(document.activeElement)) { lastOpp = oppSig; renderOppParty(st.parties.opp); loadIcons(); }
+      const oppSig2 = oppSig + JSON.stringify(st.icon_guesses || {});
+      if (oppSig2 !== lastOpp && !$("oppparty").contains(document.activeElement)) { lastOpp = oppSig2; renderOppParty(st.parties.opp, st.icon_guesses); loadIcons(); }
       const img = new Image();
       img.onload = () => { $("frame").src = img.src; $("noframe").style.display = "none"; $("stage").style.aspectRatio = img.naturalWidth + " / " + img.naturalHeight; };
       img.src = "/api/frame.jpg?t=" + Date.now();

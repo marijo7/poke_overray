@@ -17,3 +17,5 @@ web/fonts/*
 !web/fonts/README.txt
 # 登録したニックネーム
 data/nicknames.json
+# 選出画面のタイプアイコン (各自の環境で学習)
+data/types/

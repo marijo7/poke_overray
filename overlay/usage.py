@@ -88,5 +88,11 @@ class UsageDB:
             return None
         return min(cands, key=lambda e: (e.get("display") != species_ja, e.get("rank") or 9999))
 
+    def roster(self):
+        """対戦で使えるポケモンの一覧 (使用率順)。データ元にあれば全ポケモン、無ければ採用率データのポケモン。"""
+        keys = list(self.meta.get("roster") or [])
+        keys += [e["key"] for e in self.list() if e["key"] not in keys]
+        return keys
+
     def list(self):
         return sorted(self.entries.values(), key=lambda e: e.get("rank") or 9999)

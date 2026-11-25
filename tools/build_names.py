@@ -92,6 +92,20 @@ def natures(nature_rows, name_rows):
     return out
 
 
+def pokemon_types(type_rows, ptype_rows):
+    """ポケモン ID → タイプ (英語の識別子、順番どおり)"""
+    tid = {r[0]: r[1] for r in type_rows}
+    out = {}
+    for pid, type_id, slot in ptype_rows:
+        out.setdefault(pid, []).append((int(slot), tid.get(type_id, type_id)))
+    return {pid: [t for _, t in sorted(v)] for pid, v in out.items()}
+
+
+def type_names(type_rows, name_rows):
+    ident = {r[0]: r[1] for r in type_rows}
+    return {ident[r[0]]: r[2] for r in name_rows if r[1] == LANG_JA_KANA and r[0] in ident}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kanji", action="store_true", help="技・持ち物・特性を漢字表記にする")
@@ -107,6 +121,8 @@ def main():
         "forms": form_ids(pokemon_rows),
         "mega_stones": mega_stones(fetch_csv("items"), id_to_en(item_name_rows)),
         "stats": base_stats(fetch_csv("pokemon_stats")),
+        "types": pokemon_types(type_rows := fetch_csv("types"), fetch_csv("pokemon_types")),
+        "type_names": type_names(type_rows, fetch_csv("type_names")),
         "natures": natures(fetch_csv("natures"), fetch_csv("nature_names")),
         "form_abilities": form_abilities(pokemon_rows, fetch_csv("pokemon_abilities"), id_to_en(ability_name_rows)),
         "moves": build_map(fetch_csv("move_names"), args.kanji),

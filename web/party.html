@@ -52,6 +52,7 @@
     transition: border-color 0.25s, box-shadow 0.25s, opacity 0.25s;
   }
   .tile img { width: var(--size); height: var(--size); object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5)); }
+  .tile .guess { position: absolute; top: 3px; right: 5px; font-size: 12px; font-weight: 800; color: var(--sub); }  /* タイプからの推定 */
   .tile img.raw { border-radius: 6px; filter: none; }  /* 未登録: ゲーム画面から切り出したアイコンをそのまま表示 */
   .tile .ph { width: var(--size); height: var(--size); display: grid; place-items: center; font-size: calc(var(--size) * 0.4); color: var(--sub); opacity: 0.5; }
   .tile .nm { font-size: 11px; line-height: 14px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
@@ -90,7 +91,8 @@
       const img = m.sprite ? `<img src="/sprite/${m.sprite}.png" alt="" onerror="window.__imgFailedAt=Date.now();this.outerHTML='<div class=ph>?</div>'">`
         : m.icon ? `<img class="raw" src="/api/icon/${esc(m.icon)}.png" alt="">` : `<div class="ph">?</div>`;
       const nm = m.icon ? "&nbsp;" : esc(m.display);
-      out.push(`<div class="tile${m.active ? " active" : ""}${isNew ? " new" : ""}" title="${esc(m.display)}">${img}<div class="nm">${nm}</div></div>`);
+      const badge = m.guess ? '<span class="guess" title="タイプから推定">?</span>' : "";
+      out.push(`<div class="tile${m.active ? " active" : ""}${isNew ? " new" : ""}" title="${esc(m.display)}">${badge}${img}<div class="nm">${nm}</div></div>`);
     }
     return out.join("");
   }
