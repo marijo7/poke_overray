@@ -131,12 +131,19 @@ ICON_DIR = ROOT / "data" / "champions_icons"
 def fetch_champion_icons(roster, delay=0.1):
     """選出画面のアイコン照合に使う、Champions のポケモン画像を取得する (初回のみ。以後は増えた分だけ)。
 
-    画像のファイル名は API の一覧 (/api, 約 18MB) にあるので、まだ知らないポケモンがいるときだけ一覧を取り直す。"""
+    「新しいポケモン」= ランキング (毎回取得している) に、手元の対応表 (map.json) に無い名前が出てきたとき。
+    画像のファイル名は API の一覧 (/api, 約 18MB) にあるので、そのときだけ一覧を取り直す。
+    一覧を取り直してもまだ載っていなかった名前は記録しておき、7 日間は一覧を取り直さない
+    (データ元の一覧への反映が遅れている間に、更新のたびに 18MB を取り直さないため)。"""
     ICON_DIR.mkdir(parents=True, exist_ok=True)
-    map_path = ICON_DIR / "map.json"
+    map_path, miss_path = ICON_DIR / "map.json", ICON_DIR / "missing.json"
     m = json.loads(map_path.read_text(encoding="utf-8")) if map_path.exists() else {}
-    if any(r not in m for r in roster):
-        print("ポケモン画像の一覧を取得中 (初回のみ・約 18MB)...")
+    missing = json.loads(miss_path.read_text(encoding="utf-8")) if miss_path.exists() else {}
+    now = time.time()
+    new = [r for r in roster if r not in m and now - missing.get(r, 0) > 7 * 86400]
+    if new:
+        print(f"新しいポケモン {len(new)} 匹 ({'、'.join(new[:5])}{' 等' if len(new) > 5 else ''})"
+              " の画像を探すため、画像の一覧を取得中 (約 18MB)...")
         index = get_json(CBD_API)
         for e in index.get("pokemon", []):
             summ = e.get("summary") or {}
@@ -146,6 +153,14 @@ def fetch_champion_icons(roster, delay=0.1):
                 if f.get("showdown_name") and f.get("image_path"):
                     m.setdefault(f["showdown_name"], f["image_path"])
         map_path.write_text(json.dumps(m, ensure_ascii=False, indent=0), encoding="utf-8")
+        for r in new:  # まだ一覧に無かったもの → 7 日間は探し直さない
+            if r in m:
+                missing.pop(r, None)
+            else:
+                missing[r] = now
+        miss_path.write_text(json.dumps(missing, ensure_ascii=False, indent=0), encoding="utf-8")
+        if any(r not in m for r in new):
+            print(f"  画像がまだ無いポケモン: {'、'.join(r for r in new if r not in m)} (7 日後にもう一度探します)")
     todo = [r for r in roster if r in m and not (ICON_DIR / f"{r}.png").exists()]
     if todo:
         print(f"ポケモン画像を取得中: {len(todo)} 枚")

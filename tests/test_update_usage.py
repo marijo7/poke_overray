@@ -79,3 +79,43 @@ class TestFetchOncePerUpdate(unittest.TestCase):
         self.assertIsNotNone(update_usage.fetched_since_update(f, "championsbattledata", "Doubles"))
         self.assertIsNone(update_usage.fetched_since_update(Path("/nonexistent/usage.json"), "championsbattledata",
                                                             "Doubles"))
+
+
+class TestChampionIconFetch(unittest.TestCase):
+    """新しいポケモンの判断と、18MB の一覧を取り直す条件"""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self.dir = Path(tempfile.mkdtemp())
+        self.orig = (update_usage.ICON_DIR, update_usage.get_json, update_usage.urllib.request.urlopen)
+        update_usage.ICON_DIR = self.dir
+        self.index_calls = 0
+
+        def fake_get_json(url):
+            self.index_calls += 1
+            return {"pokemon": [{"battleName": "Garchomp", "summary": {"sprite": "x/Garchomp.png", "forms": []}}]}
+
+        class Resp:
+            def __enter__(s): return s
+            def __exit__(s, *a): return False
+            def read(s): return b"png"
+
+        update_usage.get_json = fake_get_json
+        update_usage.urllib.request.urlopen = lambda req, timeout=0: Resp()
+
+    def tearDown(self):
+        update_usage.ICON_DIR, update_usage.get_json, update_usage.urllib.request.urlopen = self.orig
+
+    def test_index_only_when_new(self):
+        update_usage.fetch_champion_icons(["Garchomp"], delay=0)
+        self.assertEqual(self.index_calls, 1)                       # 初回: 一覧を取得
+        self.assertTrue((self.dir / "Garchomp.png").exists())
+        update_usage.fetch_champion_icons(["Garchomp"], delay=0)
+        self.assertEqual(self.index_calls, 1)                       # 知っているポケモンだけ → 取り直さない
+
+    def test_missing_name_not_retried_for_a_week(self):
+        update_usage.fetch_champion_icons(["Garchomp", "Newmon"], delay=0)
+        self.assertEqual(self.index_calls, 1)                       # 新しい名前 → 一覧を取得 (でも載っていない)
+        update_usage.fetch_champion_icons(["Garchomp", "Newmon"], delay=0)
+        self.assertEqual(self.index_calls, 1)                       # 7 日以内は一覧を取り直さない
