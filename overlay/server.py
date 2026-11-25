@@ -270,6 +270,14 @@ def make_handler(app: App):
                     cur["fontweight"] = w if 100 <= w <= 900 else 0
                 save_config(app.cfg)
                 return self._json({"ok": True, "display": cur})
+            if path == "/api/learn_marker":  # 今の画面を選出画面として覚える
+                ok = app.recognizer is not None and app.recognizer.learn_marker()
+                return self._json({"ok": bool(ok)})
+            if path == "/api/forget_marker":
+                if app.recognizer is not None:
+                    for it in app.recognizer.marker_db.list():
+                        app.recognizer.marker_db.remove(it["id"])
+                return self._json({"ok": True})
             if path == "/api/nickname":
                 key = app.state.label_nickname(str(body.get("nick", "")), str(body.get("name", "")).strip())
                 return self._json({"ok": bool(key), "key": key})

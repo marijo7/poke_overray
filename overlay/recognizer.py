@@ -1,4 +1,5 @@
 """画面を定期的に取得し、各領域の OCR → ポケモン名特定 → 状態更新を行う。"""
+import difflib
 import io
 import logging
 import os
@@ -6,6 +7,8 @@ import os
 import numpy as np
 import threading
 import time
+
+from PIL import Image
 
 from .capture import create_capture
 from .config import save_config
@@ -248,6 +251,7 @@ class Recognizer(threading.Thread):
         self.layout_votes = {}      # 他の画面レイアウトで選出画面が読めた回数
         self.battle_seen = False    # 前の選出画面のあと、対戦画面でポケモンを読み取ったか (= 次の選出画面は新しい対戦)
         self.my_icon_cache = {}     # 選出画面の自分のポケモンの絵の判定結果 (対戦ごと)
+        self.marker_db = IconDB(ICON_DIR.parent / "markers")  # 選出画面のマーカーの画像 (画面レイアウトごと)
         self.last_champ_margin = 0.0
 
     def _setup(self):
@@ -309,18 +313,80 @@ class Recognizer(threading.Thread):
         scale = cfg["ocr"].get("scale", getattr(self.ocr, "default_scale", 2.0))
         pv = cfg.get("preview") or {}
         if pv.get("enabled"):
-            text = "".join(self._ocr_rect(frame, pv["marker"], scale))
-            keys = pv.get("keywords", ["選出"])
-            found = any(k in normalize(text) or k in text for k in keys)
+            found, text, how = self.detect_marker(frame, cfg, pv, scale)
             if not found:
-                found = self.try_other_layouts(frame, cfg, keys, scale)  # スマホ版/Switch 版の設定違いなら自動で切り替え
+                found = self.try_other_layouts(frame, cfg, pv.get("keywords", ["選出"]), scale)  # スマホ版/Switch 版の設定違い
                 pv = cfg.get("preview") or {}
-            self.state.debug["preview"] = {"text": text, "found": found, "time": time.time(),
-                                           "layout": cfg.get("layout")}
+                how = "layout" if found else how
+            self.state.debug["preview"] = {"text": text, "found": found, "how": how, "time": time.time(),
+                                           "layout": cfg.get("layout"), "has_template": self.marker_db.has_key(cfg.get("layout"))}
             if found:
                 self.process_preview(frame, cfg, pv, scale)
                 return
         self.process_battle(frame, cfg, scale)
+
+    # ---- 選出画面の判定 ----
+
+    @staticmethod
+    def marker_text_ok(text, keys):
+        """「4匹 選出してください」が読めたか。OCR の誤読に備え、一部が読めていれば良しとする。"""
+        t = normalize(text)
+        if any(k in t or k in text for k in keys):
+            return True
+        target = normalize("選出してください")
+        return len(t) >= 4 and difflib.SequenceMatcher(None, t, target).find_longest_match(
+            0, len(t), 0, len(target)).size >= 4  # 「してください」等、連続 4 文字以上が一致
+
+    @staticmethod
+    def white_text(img):
+        """白い文字だけを取り出して、白地に黒い文字にする (背景が透けた選出画面の文字を OCR しやすくする)。"""
+        a = np.asarray(img.convert("RGB"), dtype=np.int16)
+        mask = a.min(axis=2) > 185
+        out = np.full(mask.shape, 255, np.uint8)
+        out[mask] = 0
+        return Image.fromarray(out).convert("RGB")
+
+    def detect_marker(self, frame, cfg, pv, scale):
+        """選出画面か判定する。戻り値: (選出画面か, 読めた文字, 判定方法)
+        1. 覚えたマーカーの画像と似ているか (速く、文字認識に頼らない)
+        2. 文字認識 (そのまま) で「選出」等が読めるか
+        3. 白い文字だけを取り出して文字認識
+        文字で判定できたときは、そのマーカーの画像を覚える (次回から 1 で判定できる)。"""
+        layout = cfg.get("layout") or "custom"
+        outer, inner = crop_with_margin(frame, pv["marker"])
+        if self.marker_db.has_key(layout):
+            _, score = self.marker_db.match(outer, keys={layout})
+            if score >= 0.85:
+                return True, "", "image"
+        keys = pv.get("keywords", ["選出"])
+        text = "".join(self._ocr_rect(frame, pv["marker"], scale))
+        how = "ocr"
+        if not self.marker_text_ok(text, keys):
+            W, H = frame.size
+            r = pv["marker"]
+            crop = frame.crop((int(r["x"] * W), int(r["y"] * H), int((r["x"] + r["w"]) * W), int((r["y"] + r["h"]) * H)))
+            text2 = "".join(self.ocr.recognize(self.white_text(preprocess(crop, scale))))
+            if not self.marker_text_ok(text2, keys):
+                return False, text or text2, None
+            text, how = text2, "ocr-white"
+        if not self.marker_db.has_key(layout):
+            self.marker_db.add(inner, layout)
+            log.info("選出画面のマーカーの画像を覚えました (%s)", layout)
+        return True, text, how
+
+    def learn_marker(self):
+        """設定画面のボタン: 今の画面を選出画面として、マーカーの画像を覚える (文字認識がうまくいかない場合用)。"""
+        cfg, frame = self.get_config(), self.state.frame
+        if frame is None or not (cfg.get("preview") or {}).get("marker"):
+            return False
+        layout = cfg.get("layout") or "custom"
+        for it in self.marker_db.list():
+            if it["key"] == layout:
+                self.marker_db.remove(it["id"])
+        _, inner = crop_with_margin(frame, cfg["preview"]["marker"])
+        self.marker_db.add(inner, layout)
+        log.info("選出画面のマーカーの画像を覚えました (手動, %s)", layout)
+        return True
 
     def opp_icons_changed(self, frame, pv, n):
         """選出画面の相手アイコンが、今の対戦で見たものと半分以上違うか (= 別の相手との対戦)。"""
@@ -345,7 +411,7 @@ class Recognizer(threading.Thread):
             if name == cfg.get("layout"):
                 continue
             text = "".join(self._ocr_rect(frame, preset["preview"]["marker"], scale))
-            if any(k in normalize(text) or k in text for k in keys):
+            if self.marker_text_ok(text, keys):
                 n = self.layout_votes.get(name, 0) + 1
                 self.layout_votes = {name: n}
                 if n >= 2:

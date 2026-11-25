@@ -92,6 +92,10 @@
       <table id="regions"></table>
       <h2 style="margin-top:14px">選出画面 <label class="hint" style="font-weight:400"><input type="checkbox" id="pvon"> 読み取る</label></h2>
       <div id="pvdebug" class="pvdebug"></div>
+      <div class="row" style="margin-bottom:6px">
+        <button id="learnmarker" title="選出画面を表示しているときに押す">今の画面を選出画面として覚える</button>
+        <button id="forgetmarker">覚えたマーカーを消す</button><span id="markermsg" class="hint"></span>
+      </div>
       <table id="pvregions"></table>
       <p class="hint">選出画面を表示した状態で、各項目を選んでドラッグ。1 匹目と 6 匹目を合わせれば間は自動で等間隔に並びます。マーカーは「4匹 選出してください」の行に合わせてください。</p>
       <div class="row" style="margin-top:8px">
@@ -396,8 +400,11 @@
   function renderPvDebug(d, status) {
     const m = d.preview;
     if (!m) { $("pvdebug").innerHTML = "読み取り結果: まだ画面を読んでいません"; return; }
+    const how = { image: "覚えたマーカーの画像と一致", ocr: "文字", "ocr-white": "白い文字だけを取り出して文字", layout: "別の画面レイアウトで" }[m.how] || "";
     const lines = [`${status.layout_switched ? `<b class="ok">画面に合わせて読み取り範囲を「${esc(status.layout_switched)}」に自動で切り替えました</b><br>` : ""}選出画面の判定: ${m.found ? '<b class="ok">選出画面</b>' : '<b class="ng">選出画面ではない</b>'}
-      (マーカーの文字: 「${esc(m.text || "読めず")}」${m.found ? "" : " ← ここに「選出」が含まれると選出画面と判定"})`];
+      ${m.found ? `(${how}で判定)` : `(マーカーの文字: 「${esc(m.text || "読めず")}」 ← 「選出してください」が読めると選出画面と判定。
+        読めない場合は、選出画面のときに「今の画面を選出画面として覚える」を押してください)`}
+      ${m.has_template ? "・マーカーの画像を覚えています" : ""}`];
     const my = [...Array(6).keys()].map((i) => d["my" + i]).filter(Boolean);
     if (my.length) lines.push("自分の名前: " + my.map((x, i) => `${i + 1}.「${esc(x.text || "読めず")}」${x.match ? "→" + esc(x.match) : ""}`).join(" / "));
     const ic = [...Array(6).keys()].map((i) => d["icon" + i]).filter(Boolean);
@@ -411,6 +418,13 @@
     try { $(id).open = localStorage.getItem(id + "-open") === "1"; } catch (e) {}
     $(id).addEventListener("toggle", () => { try { localStorage.setItem(id + "-open", $(id).open ? "1" : "0"); } catch (e) {} });
   }
+
+  $("learnmarker").onclick = async () => {
+    const r = await post("/api/learn_marker");
+    $("markermsg").textContent = r.ok ? "覚えました。次からはこの画像で選出画面を判定します" : "画面を取得できていません";
+    setTimeout(() => ($("markermsg").textContent = ""), 4000);
+  };
+  $("forgetmarker").onclick = async () => { await post("/api/forget_marker"); $("markermsg").textContent = "消しました"; setTimeout(() => ($("markermsg").textContent = ""), 2500); };
 
   // ---- ニックネーム ----
   let lastUnknown = "";
