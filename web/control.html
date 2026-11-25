@@ -60,6 +60,9 @@
   .fontpreview .fp-row { display: flex; justify-content: space-between; font-size: 15px; line-height: 22px; padding: 0 6px; margin: 2px 0; border-radius: 4px; background: rgba(79, 140, 255, 0.45); }
   .pvdebug { font-size: 12px; color: var(--sub); background: var(--bg); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; line-height: 1.6; }
   .pvdebug b.ok { color: #2f9e44; } .pvdebug b.ng { color: var(--warn); }
+  details > summary { cursor: pointer; list-style: none; }
+  details > summary::before { content: "▶ "; font-size: 11px; color: var(--sub); }
+  details[open] > summary::before { content: "▼ "; }
   .rect.pv { border-color: #b197fc; background: rgba(177, 151, 252, 0.12); }
   .rect.pv span { background: #b197fc; }
   .rect.ghost { border-style: dashed; opacity: 0.7; }
@@ -132,9 +135,12 @@
         相手のニックネームは、そのポケモンを以前に名前で認識していれば、名前の横の顔画像で自動判定します。</p>
     </div>
     <div class="panel">
-      <h2>登録済みアイコン <span class="hint" id="iconcount"></span></h2>
-      <div class="chips" id="iconlist"></div>
-      <p class="hint">「顔」は対戦中の名前の横の画像で、メガシンカの判定に使います。間違えて登録したものは × で削除できます。</p>
+      <details id="iconsection">
+        <summary><h2 style="display:inline">登録済みアイコン</h2> <span class="hint" id="iconcount"></span>
+          <span class="hint">(間違えて登録したものを消すとき開く)</span></summary>
+        <div class="chips" id="iconlist" style="margin-top:8px"></div>
+        <p class="hint">「顔」は対戦中の名前の横の画像で、メガシンカやニックネームの判定に使います。間違えて登録したものは × で削除できます。</p>
+      </details>
     </div>
     <div class="panel">
       <h2>性格の採用率 (手入力)</h2>
@@ -444,6 +450,10 @@
       : x.guess ? "推定 " + esc(x.guess) : x.cands ? `候補 ${x.cands} 匹` : "未登録"}`).join(" / "));
     $("pvdebug").innerHTML = lines.join("<br>");
   }
+
+  // 登録済みアイコンの欄は普段は畳んでおく (開閉の状態はブラウザに記憶)
+  try { $("iconsection").open = localStorage.getItem("iconsection-open") === "1"; } catch (e) {}
+  $("iconsection").addEventListener("toggle", () => { try { localStorage.setItem("iconsection-open", $("iconsection").open ? "1" : "0"); } catch (e) {} });
 
   // ---- ニックネーム ----
   let lastUnknown = "";
