@@ -8,7 +8,7 @@ import threading
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from .config import save_config
 from .names import all_names_ja
@@ -142,7 +142,7 @@ def make_handler(app: App):
                 self.wfile.write(data)
                 return
 
-            f = (WEB_DIR / path.lstrip("/")).resolve()
+            f = (WEB_DIR / unquote(path).lstrip("/")).resolve()  # 日本語のファイル名 (フォント等) に対応
             if WEB_DIR not in f.parents or not f.is_file():
                 return self._send(404, b"not found", "text/plain")
             ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"

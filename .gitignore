@@ -13,3 +13,5 @@ data/icons/
 data/portraits/
 # 手入力した性格の採用率
 data/natures.json
+web/fonts/*
+!web/fonts/README.txt

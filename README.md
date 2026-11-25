@@ -164,6 +164,24 @@ OBS で別のブラウザソースを追加：
 
 画像は初回表示時にインターネットから取得し、`data/sprites` に保存して以後はそれを使います。
 
+### フォントの変更
+
+カード・パーティ表示とも、URL の末尾にパラメータを付けるとフォントを変えられます（両方に同じものを付けると統一できます）。
+
+| 方法 | 例 | 説明 |
+|---|---|---|
+| PC のフォント | `font=メイリオ` | PC にインストールされているフォント名をそのまま指定 |
+| Google Fonts | `gfont=M PLUS Rounded 1c` | [Google Fonts](https://fonts.google.com/?subset=japanese) の日本語フォントをインストールなしで使える（要インターネット） |
+| フォントファイル | `fontfile=MyFont.ttf` | `web/fonts` フォルダに置いた .ttf / .otf / .woff2 を使う |
+| 太さ | `fontweight=500` | 100〜900（見出しは自動で太字） |
+
+例: `http://127.0.0.1:8765/overlay?moves=4&gfont=M PLUS Rounded 1c`
+
+Google Fonts のおすすめ: `M PLUS Rounded 1c`（丸ゴシック）、`Zen Maru Gothic`（丸ゴシック）、
+`Dela Gothic One`（極太）、`DotGothic16`（ドット風）。
+指定したフォントが見つからない場合は、既定のフォント（BIZ UDPゴシック等）で表示されます。
+配信でフォントを使う場合のライセンスは、各フォントの配布元で確認してください（Google Fonts は配信での利用可）。
+
 ### 配置例（1920×1080、スマホ版の画面）
 
 | ソース | 位置 | 大きさ | URL |

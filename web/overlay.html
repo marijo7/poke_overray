@@ -16,11 +16,13 @@
     w=300 h=600        カードの幅・高さ (px) を固定。省略時も、データの量によらず同じ大きさになるよう行数を固定している
     layout=row         カードを横並びにする (既定は縦並び)
     history=1          この対戦で見た相手の一覧を表示
+    font=メイリオ / gfont=M PLUS Rounded 1c / fontfile=MyFont.ttf   フォントの変更 (font.js 参照)
     scale=1.2          全体の拡大率
     theme=light        明るい配色
 -->
 <style>
   :root {
+    --font-default: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif;
     --bg: rgba(16, 18, 28, 0.86);
     --fg: #f4f6fb;
     --sub: #a9b0c4;
@@ -41,7 +43,7 @@
   }
   html, body { margin: 0; background: transparent; overflow: hidden; }
   body {
-    font-family: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif;
+    font-family: var(--font, var(--font-default)); font-weight: var(--font-weight, 400);
     color: var(--fg);
     zoom: var(--scale);
   }
@@ -94,6 +96,7 @@
   #history.show { display: flex; }
   .chip { background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
 </style>
+<script src="/font.js"></script>
 </head>
 <body>
 <div id="cards"></div>

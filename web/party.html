@@ -12,10 +12,12 @@
     size=80            画像の大きさ (px)
     names=0            名前を非表示
     label=0            「自分」「相手」の見出しを非表示
+    font=メイリオ / gfont=M PLUS Rounded 1c / fontfile=MyFont.ttf   フォントの変更 (font.js 参照)
     scale=1.2 / theme=light
 -->
 <style>
   :root {
+    --font-default: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif;
     --bg: rgba(16, 18, 28, 0.82);
     --tile: rgba(255, 255, 255, 0.07);
     --fg: #f4f6fb;
@@ -34,7 +36,7 @@
     --border: rgba(0, 0, 0, 0.12);
   }
   html, body { margin: 0; background: transparent; overflow: hidden; }
-  body { font-family: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif; color: var(--fg); zoom: var(--scale); }
+  body { font-family: var(--font, var(--font-default)); font-weight: var(--font-weight, 400); color: var(--fg); zoom: var(--scale); }
   #root { display: flex; flex-direction: column; gap: 10px; padding: 8px; align-items: flex-start; }
   #root.column { flex-direction: row; align-items: flex-start; }
   #root.split { flex-direction: row; justify-content: space-between; align-items: flex-start; }
@@ -59,6 +61,7 @@
   .hide-names .nm { display: none; }
   @keyframes pop { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: none; } }
 </style>
+<script src="/font.js"></script>
 </head>
 <body>
 <div id="root"></div>
