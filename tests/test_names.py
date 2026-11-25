@@ -53,6 +53,21 @@ class TestNames(unittest.TestCase):
         self.assertEqual(resolve("キュウコン(アローラ)")["key"], "Ninetales-Alola")
         self.assertEqual(resolve("ミミッキュ")["sprite"], 778)
 
+    def test_resolve_with_usage_variants(self):
+        """表記ゆれ (空白区切り・カッコ・種族名だけ) でも採用率データの同じフォルムになる"""
+        import tempfile, json
+        from pathlib import Path
+        from overlay.usage import UsageDB
+        f = Path(tempfile.mkdtemp()) / "usage.json"
+        f.write_text(json.dumps({"pokemon": [{"key": "Floette-Eternal", "display": "フラエッテ(えいえんのはな)",
+                                              "species": "フラエッテ", "rank": 1, "moves": [], "items": [],
+                                              "abilities": []}]}, ensure_ascii=False), encoding="utf-8")
+        from overlay.recognizer import State
+        st = State(UsageDB(f))
+        for s in ("フラエッテ えいえんのはな", "フラエッテ(えいえんのはな)", "フラエッテ", "floette-eternal"):
+            r = st._resolve(s)
+            self.assertEqual((r["key"], r["has_data"], r["sprite"]), ("Floette-Eternal", True, 10061), s)
+
     def test_normalize(self):
         self.assertEqual(normalize("ｶﾞﾌﾞﾘｱｽ"), "ガブリアス")
 

@@ -178,9 +178,19 @@ def resolve(ident: str, usage_db=None):
         return {"key": entry["key"], "display": entry["display"], "species": entry["species"],
                 "sprite": sprite_id_for_showdown(entry["key"]), "has_data": True}
     if re.fullmatch(r"[A-Za-z0-9 .'’:-]+", ident):  # 英語 (Showdown) 名
+        if usage_db is not None and usage_db.get(ident) is None:
+            low = ident.lower()  # 大文字小文字違いで採用率データにあるか
+            hit = next((k for k in usage_db.entries if k.lower() == low), None)
+            if hit:
+                return resolve(hit, usage_db)
         display, species = showdown_to_ja(ident)
         return {"key": ident, "display": display, "species": species,
                 "sprite": sprite_id_for_showdown(ident), "has_data": False}
+    if usage_db is not None:  # 空白・カッコの有無などの表記ゆれを吸収して採用率データと照合
+        n = normalize(ident)
+        entry = next((e for e in usage_db.entries.values() if normalize(e["display"]) == n), None)
+        if entry:
+            return resolve(entry["key"], usage_db)
     sd = ja_form_index().get(normalize(ident))
     if sd:  # メガリザードンY などフォルム付きの日本語名
         display, species = showdown_to_ja(sd)
