@@ -35,6 +35,20 @@ def normalize(text: str) -> str:
     return t
 
 
+# 斜体の文字などで OCR が取り違えやすい組を同一視する (比較用)
+_LOOSE = str.maketrans({
+    "ソ": "ン", "ツ": "シ", "ッ": "シ", "ァ": "ア", "ィ": "イ", "ゥ": "ウ", "ェ": "エ", "ォ": "オ",
+    "ャ": "ヤ", "ュ": "ユ", "ョ": "ヨ", "ヮ": "ワ", "ヵ": "カ", "ヶ": "ケ",
+})
+
+
+def loose(t: str) -> str:
+    """normalize 済みの文字列から、濁点・半濁点と取り違えやすい差を取り除く (ビ/ピ/ヒ, ン/ソ, ッ/ツ/シ 等)。"""
+    t = unicodedata.normalize("NFD", t)
+    t = "".join(c for c in t if c not in "\u3099\u309a")
+    return unicodedata.normalize("NFC", t).translate(_LOOSE)
+
+
 @lru_cache(maxsize=1)
 def load_names() -> dict:
     return json.loads((DATA_DIR / "names.json").read_text(encoding="utf-8"))
@@ -93,6 +107,9 @@ class NameMatcher:
         self.by_norm = {}
         for n in names:
             self.by_norm.setdefault(normalize(n), n)
+        self.by_loose = {}
+        for n in self.by_norm:
+            self.by_loose.setdefault(loose(n), []).append(n)
         # 長い名前を優先 (ミュウツー を ミュウ より先に)
         self.sorted_norms = sorted(self.by_norm, key=len, reverse=True)
 
@@ -113,11 +130,18 @@ class NameMatcher:
         for n in self.sorted_norms:
             if len(n) >= 3 and n in t:
                 return self.by_norm[n], 0.95
+        ratio = lambda a, b: difflib.SequenceMatcher(None, a, b).ratio()
+        # 取り違えやすい文字を同一視すると一致 (グレソアルマ → グレンアルマ, ビピヨソ → ビビヨン)
+        lt = loose(t)
+        if lt in self.by_loose:
+            n = max(self.by_loose[lt], key=lambda n: ratio(t, n))
+            return self.by_norm[n], 0.9
         best, best_score = None, 0.0
         for n in self.sorted_norms:
             if abs(len(n) - len(t)) > 3:
                 continue
-            s = difflib.SequenceMatcher(None, t, n).ratio()
+            # 元の文字列と、取り違えを同一視した文字列の両方で比べて高いほう
+            s = max(ratio(t, n), ratio(lt, loose(n)) * 0.97)
             if s > best_score:
                 best, best_score = n, s
         if best is not None and best_score >= self.min_ratio:

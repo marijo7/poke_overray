@@ -17,6 +17,17 @@ class TestNames(unittest.TestCase):
         self.assertEqual(self.m.match("サ一フゴ一 Lv.50")[0], "サーフゴー")
         self.assertEqual(self.m.match("ゴリランダ ー♂")[0], "ゴリランダー")
 
+    def test_italic_confusions(self):
+        # スマホ版の対戦画面 (斜体) で実際に出た誤読
+        self.assertEqual(self.m.match("グレソアルマ")[0], "グレンアルマ")
+        self.assertEqual(self.m.match("イエツサン")[0], "イエッサン")
+        self.assertEqual(self.m.match("ビピヨソ")[0], "ビビヨン")
+        self.assertEqual(self.m.match("ピビヨン")[0], "ビビヨン")
+        self.assertEqual(self.m.match("フラエッテーーア")[0], "フラエッテ")
+        # 同一視しても本物の名前が優先される
+        self.assertEqual(self.m.match("ソーナンス")[0], "ソーナンス")
+        self.assertEqual(self.m.match("ピカチュウ")[0], "ピカチュウ")
+
     def test_hiragana_and_extra(self):
         self.assertEqual(self.m.match("あいての ドドゲザン")[0], "ドドゲザン")
 
