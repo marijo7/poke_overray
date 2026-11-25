@@ -84,7 +84,7 @@ OBS で **ソース追加 → ブラウザ**：
 | 項目 | 値 |
 |---|---|
 | URL | `http://127.0.0.1:8765/overlay` |
-| 幅 / 高さ | 340 × 1080（横並びなら 700 × 450 など） |
+| 幅 / 高さ | 320 × 1010（横並び `layout=row` なら 630 × 510） |
 
 URL パラメータで表示を変えられます（`?` の後に `&` でつなぐ）：
 
@@ -92,13 +92,14 @@ URL パラメータで表示を変えられます（`?` の後に `&` でつな�
 |---|---|---|
 | `slot` | `slot=opp1` | 特定の領域だけ表示（相手ごとに別ソースにして配置できる） |
 | `layout` | `layout=row` | カードを横並び |
-| `moves` / `items` / `abilities` | `moves=4` | 表示件数（0 で非表示） |
+| `moves` / `items` / `abilities` | `moves=6` | 表示件数（既定は 4 / 2 / 2。0 で非表示） |
 | `sprite` | `sprite=0` | ポケモンの画像を非表示 |
 | `stats` | `stats=0` | 種族値を非表示 |
 | `nature` | `nature=0` | 性格・能力ポイントを非表示 |
-| `natures` / `spreads` | `natures=2&spreads=1` | 性格 / 能力ポイントの表示件数（能力ポイントは既定で非表示） |
+| `natures` / `spreads` | `natures=3&spreads=1` | 性格 / 能力ポイントの表示件数（既定は 2 / 0 = 能力ポイントは非表示） |
 | `w` / `h` | `w=320&h=560` | カードの幅・高さを px で固定（はみ出した分は切れる） |
 
+カードの既定の大きさは **1 枚 300×488px**（技 4・持ち物 2・特性 2・性格 2。2 枚縦に並べて 1080px に収まる）。
 カードは、データの量（メガシンカの有無、採用率データの有無など）によらず、**常に同じ大きさ**になります
 （足りない行は空欄で場所を確保）。相手が場にいない枠も見えないカードで場所を確保するので、カードの位置もずれません。
 大きさは表示件数（`moves` など）と `scale` で決まり、`w` / `h` で直接指定することもできます。
@@ -114,7 +115,7 @@ URL パラメータで表示を変えられます（`?` の後に `&` でつな�
 | `scale` | `scale=1.3` | 拡大率 |
 | `theme` | `theme=light` | 明るい配色 |
 
-例: `http://127.0.0.1:8765/overlay?slot=opp1&moves=4&items=2&scale=1.2`
+例: `http://127.0.0.1:8765/overlay?slot=opp1&moves=6&scale=1.2`
 
 ### 3. 選出画面の読み取り
 
@@ -210,7 +211,7 @@ OBS で別のブラウザソースを追加：
 | フォントファイル | `fontfile=MyFont.ttf` | `web/fonts` フォルダに置いた .ttf / .otf / .woff2 を使う |
 | 太さ | `fontweight=500` | 100〜900（見出しは自動で太字） |
 
-例: `http://127.0.0.1:8765/overlay?moves=4&gfont=M PLUS Rounded 1c`
+例: `http://127.0.0.1:8765/overlay?gfont=M PLUS Rounded 1c`
 
 Google Fonts のおすすめ: `M PLUS Rounded 1c`（丸ゴシック）、`Zen Maru Gothic`（丸ゴシック）、
 `Dela Gothic One`（極太）、`DotGothic16`（ドット風）。
@@ -222,7 +223,7 @@ Google Fonts のおすすめ: `M PLUS Rounded 1c`（丸ゴシック）、`Zen Ma
 | ソース | 位置 | 大きさ | URL |
 |---|---|---|---|
 | ゲーム映像 | 0, 0 | 1570×732 | （キャプチャ） |
-| 採用率カード | 1572, 6 | 348×1074 | `/overlay?moves=4&items=2&abilities=2&natures=2&w=318&scale=1.04` |
+| 採用率カード | 1572, 6 | 348×1074 | `/overlay?w=318&scale=1.04` |
 | パーティ | 0, 800 | 1570×280 | `/party?scale=1.3` |
 
 ### 5. 対戦中
