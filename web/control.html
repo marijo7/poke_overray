@@ -122,7 +122,7 @@
       <h2>性格の採用率 (手入力)</h2>
       <div class="row" id="natquick"></div>
       <div class="row" style="margin-top:6px"><input list="usagelist" id="natpoke" placeholder="ポケモン (採用率データにあるもの)" style="flex:1;min-width:0"></div>
-      <table id="natrows" style="margin-top:6px"></table>
+      <table id="natrows" style="margin-top:6px;table-layout:auto"></table>
       <div class="row" style="margin-top:8px"><button class="primary" id="natsave">保存</button><span id="natsaved" class="hint"></span></div>
       <p class="hint">ゲーム内の「バトルデータ」などを見て入力すると、カードに性格の採用率が出ます。採用率データの更新では消えません (data/natures.json に保存)。全部空にして保存すると削除。</p>
     </div>
@@ -330,8 +330,8 @@
     $("natpoke").value = p ? p.display : "";
     const rows = (natData[key] || []).concat(Array(5).fill({ name: "", pct: "" })).slice(0, 5);
     $("natrows").innerHTML = rows.map((r, i) => `<tr>
-      <td><input list="naturelist" placeholder="性格" value="${esc(r.name)}" data-n="${i}"></td>
-      <td style="white-space:nowrap"><input type="number" min="0" max="100" step="0.1" placeholder="%" value="${r.pct}" style="width:80px" data-np="${i}"> %</td></tr>`).join("");
+      <td style="width:100%"><input list="naturelist" placeholder="性格" value="${esc(r.name)}" data-n="${i}" style="width:100%"></td>
+      <td style="white-space:nowrap"><input type="number" min="0" max="100" step="0.1" placeholder="%" value="${r.pct}" style="width:64px" data-np="${i}"> %</td></tr>`).join("");
   }
   $("natpoke").addEventListener("change", (e) => {
     const p = usageList.find((x) => x.display === e.target.value.trim());
