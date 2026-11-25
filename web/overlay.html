@@ -133,7 +133,7 @@
     if (!natures.length && b && b.nature) {  // Pikalytics のシングル: 最も多い型の性格だけ
       natures = [{ name: b.nature.name + (b.nature.up ? ` (${b.nature.up}↑${b.nature.down}↓)` : ""), pct: b.pct }];
     }
-    return section(p.natures_manual ? "性格 (手入力)" : "性格", natures, opt.natureCount)
+    return section("性格", natures, opt.natureCount)
       + section("能力ポイント", p.spreads, opt.spreads);
   }
   if (q.get("layout") === "row") document.getElementById("cards").classList.add("row");

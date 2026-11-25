@@ -157,9 +157,6 @@ def make_handler(app: App):
                         seen.add(n)
                         out.append(n)
                 return self._json(out)
-            if path == "/api/natures":  # 性格の手入力: 候補一覧と、入力済みの内容
-                from .names import nature_list_ja
-                return self._json({"natures": nature_list_ja(), "data": app.usage.manual_natures})
             if path == "/api/icons":
                 from .names import resolve
                 out = []
@@ -271,13 +268,6 @@ def make_handler(app: App):
                     cur["fontweight"] = w if 100 <= w <= 900 else 0
                 save_config(app.cfg)
                 return self._json({"ok": True, "display": cur})
-            if path == "/api/natures":
-                key = str(body.get("key", ""))
-                if app.usage.get(key) is None:
-                    return self._json({"error": "採用率データに無いポケモンです"}, 400)
-                saved = app.usage.set_natures(key, body.get("natures") or [])
-                app.state.version += 1
-                return self._json({"ok": True, "natures": saved})
             if path == "/api/nickname":
                 key = app.state.label_nickname(str(body.get("nick", "")), str(body.get("name", "")).strip())
                 return self._json({"ok": bool(key), "key": key})

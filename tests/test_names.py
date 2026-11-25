@@ -113,21 +113,16 @@ class TestStatsNature(unittest.TestCase):
         self.assertIsNone(parse_top_build("No EV spread or nature data available."))
 
 
-class TestManualNatures(unittest.TestCase):
-    def test_set_and_persist(self):
+class TestNatureLabels(unittest.TestCase):
+    def test_data_source_natures_get_stat_labels(self):
         import json
         import tempfile
         from pathlib import Path
         from overlay.usage import UsageDB
-        d = Path(tempfile.mkdtemp())
-        (d / "usage.json").write_text(json.dumps({"pokemon": [
-            {"key": "Garchomp", "display": "ガブリアス", "species": "ガブリアス", "rank": 1,
-             "moves": [], "items": [], "abilities": []}]}, ensure_ascii=False), encoding="utf-8")
-        u = UsageDB(d / "usage.json")
-        saved = u.set_natures("Garchomp", [{"name": "いじっぱり", "pct": 30}, {"name": "ようき", "pct": 60},
-                                           {"name": "存在しない", "pct": 10}, {"name": "ずぶとい", "pct": 0}])
-        self.assertEqual([n["name"] for n in saved], ["いじっぱり", "ようき"])  # 不正な行は捨てる
-        n = UsageDB(d / "usage.json").get("Garchomp")["natures"]  # 再読込しても残る (別ファイル)
-        self.assertEqual([(x["name"], x["pct"]) for x in n], [("ようき (S↑C↓)", 60.0), ("いじっぱり (A↑C↓)", 30.0)])
-        u.set_natures("Garchomp", [])
-        self.assertEqual(UsageDB(d / "usage.json").get("Garchomp")["natures"], [])
+        f = Path(tempfile.mkdtemp()) / "usage.json"
+        f.write_text(json.dumps({"pokemon": [
+            {"key": "Garchomp", "display": "ガブリアス", "species": "ガブリアス", "rank": 1, "moves": [], "items": [],
+             "abilities": [], "natures": [{"name": "いじっぱり", "pct": 34.7}, {"name": "ようき", "pct": 35.3}]}]},
+            ensure_ascii=False), encoding="utf-8")
+        n = UsageDB(f).get("Garchomp")["natures"]
+        self.assertEqual([(x["name"], x["pct"]) for x in n], [("ようき (S↑C↓)", 35.3), ("いじっぱり (A↑C↓)", 34.7)])

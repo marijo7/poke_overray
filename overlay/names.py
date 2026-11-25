@@ -343,7 +343,7 @@ def format_spread(spread: str) -> str:
 
 
 def nature_list_ja():
-    """性格の日本語名一覧 (補正の表記つき)。手入力の候補に使う。"""
+    """性格の日本語名一覧 (上がる/下がる能力つき)。"""
     out = []
     for en in load_names().get("natures", {}):
         n = nature_info(en)
