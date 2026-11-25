@@ -55,6 +55,12 @@
   .chip.unknown { flex-wrap: wrap; }
   .chip .cands { flex-basis: 100%; font-size: 12px; color: var(--sub); padding: 2px 4px; }
   #nickunknown .cands button { font-size: 12px; padding: 1px 8px; margin: 2px 2px 0 0; border: 1px solid var(--accent); border-radius: 999px; background: var(--panel); color: var(--accent); }
+  .chip .fixbtn { font-size: 11px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--sub); }
+  #oppparty .chip { flex-wrap: wrap; }
+  .chip .fixbox { display: flex; flex-basis: 100%; gap: 4px; align-items: center; flex-wrap: wrap; padding: 4px 2px 2px; }
+  .chip .fixbox[hidden] { display: none; }
+  .chip .fixbox input { width: 120px; }
+  .chip .fixbox button { font-size: 12px; padding: 1px 8px; border: 1px solid var(--accent); border-radius: 999px; background: var(--panel); color: var(--accent); }
   .chip .cands button { font-size: 12px; padding: 1px 8px; margin: 2px 2px 0 0; border: 1px solid var(--accent); border-radius: 999px; background: var(--panel); color: var(--accent); }
   .fontpreview { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: rgba(16, 18, 28, 0.9); color: #f4f6fb; }
   .fontpreview .fp-name { font-size: 22px; font-weight: 800; border-bottom: 2px solid #ffcc33; margin-bottom: 6px; }
@@ -129,7 +135,7 @@
       <h2>相手のパーティ</h2>
       <div class="chips" id="oppparty"></div>
       <div class="ctl row" style="margin-top:8px"><input list="pokelist" id="oppadd" placeholder="追加 (名前を入力して Enter)" style="flex:1;min-width:0"></div>
-      <p class="hint">選出画面のアイコンから自動で入ります。未登録のアイコンは名前を入れるか、タイプから絞った候補のボタンを押すと登録され、次回から自動で認識します。候補が 1 匹だけなら自動で入り「推定」と表示されます。対戦中に名前を読み取った相手も追加されます。</p>
+      <p class="hint">選出画面のアイコンから自動で入ります。未登録のアイコンは名前を入れるか候補のボタンを押すと登録され、次回から自動で認識します。推定や登録が間違っていたら「修正」で正しいポケモンを選んでください (アイコンも覚え直します)。対戦中に名前を読み取った相手も追加されます。</p>
     </div>
     <div class="panel">
       <h2>ニックネーム</h2>
@@ -492,16 +498,27 @@
         return `<span class="chip unknown"><img src="/api/icon/${esc(m.icon)}.png" alt="">
           <input list="pokelist" placeholder="名前を入れて登録" data-label="${esc(m.icon)}"><button data-rm="${i}" title="削除">×</button>${cands}</span>`;
       }
+      const g = m.uid ? guesses[m.uid] : null;
+      const fix = m.uid ? `<button class="fixbtn" data-fix="${esc(m.uid)}" title="違うポケモンだったら修正 (アイコンも正しく覚え直します)">修正</button>
+        <span class="fixbox" data-fixbox="${esc(m.uid)}" hidden><input list="pokelist" placeholder="正しいポケモン" data-label="${esc(m.uid)}">
+        ${g && g.cands.length > 1 ? g.cands.filter((c) => c.key !== m.key).map((c) =>
+          `<button data-label-uid="${esc(m.uid)}" data-label-name="${esc(c.key)}">${esc(c.display)}</button>`).join("") : ""}</span>` : "";
       return `<span class="chip${m.active ? " active" : ""}">
       ${m.sprite ? `<img src="/sprite/${m.sprite}.png" alt="" onerror="this.remove()">` : ""}${esc(m.display)}
-      ${m.guess ? '<span class="tag" title="タイプから推定。対戦に出てきたら確定して、アイコンを覚えます">推定</span>' : ""}
-      <button data-rm="${i}" title="削除">×</button></span>`;
+      ${m.guess ? '<span class="tag" title="タイプや絵から推定。対戦に出てきたら確定して、アイコンを覚えます">推定</span>' : ""}
+      ${fix}<button data-rm="${i}" title="削除">×</button></span>`;
     }).join("") : '<span class="hint">まだありません</span>';
   }
+  $("oppparty").addEventListener("click", (e) => {  // 「修正」: 入力欄と候補を開く
+    const uid = e.target.dataset.fix; if (!uid) return;
+    const box = $("oppparty").querySelector(`[data-fixbox="${uid}"]`);
+    box.hidden = !box.hidden;
+    if (!box.hidden) box.querySelector("input").focus();
+  });
   $("oppparty").addEventListener("click", async (e) => {
     if (e.target.dataset.labelUid) {  // 候補ボタン
       await post("/api/icon_label", { uid: e.target.dataset.labelUid, name: e.target.dataset.labelName });
-      loadIcons(); return;
+      e.target.blur(); lastOpp = ""; loadIcons(); return;
     }
     if (e.target.dataset.rm === undefined) return;
     const members = oppParty.filter((_, i) => i !== +e.target.dataset.rm);
@@ -511,7 +528,8 @@
     const uid = e.target.dataset.label, name = e.target.value.trim();
     if (!uid || !name) return;
     const r = await post("/api/icon_label", { uid, name });
-    if (!r.ok) alert("登録できませんでした (アイコンが古い可能性があります)");
+    if (!r.ok) alert("登録できませんでした (ポケモン名を確認してください)");
+    e.target.blur(); lastOpp = "";  // 入力欄から離れて、すぐ表示を更新する
     loadIcons();
   });
   async function loadIcons() {

@@ -39,6 +39,8 @@ class State:
         self.type_db = IconDB(ICON_DIR.parent / "types") if icons is not None else None  # タイプアイコン (学習)
         self.icon_guess = {}   # uid -> {"types": [...], "cands": [...], "guess": キー or None}: タイプからの推定
         self.mega_used = {}    # side -> メガシンカしたポケモン (1 回の対戦で 1 人 1 匹まで)
+        self.member_uid = {}   # 相手パーティの登録 -> 選出画面のアイコン (uid)。設定画面の「修正」に使う
+        self.icon_fixed = {}   # uid -> 修正後のキー (選出画面の読み取りで上書きしない)
         self.lock = threading.Lock()
         self.slots = {}        # region id -> {"ident", "species", "side", "source", "updated"}
         # パーティ (識別子 = 採用率データのキー or 日本語名)。自分は config に保存、相手は対戦ごとにリセット
@@ -152,12 +154,31 @@ class State:
             return key
 
     def label_icon(self, uid, name):
-        """未登録アイコンに名前を付けて登録する。戻り値: 登録したキー"""
+        """選出画面の相手アイコンに名前を付ける (未登録の登録・推定や登録の間違いの修正)。戻り値: 登録したキー"""
         with self.lock:
             if uid not in self.icon_crops:
                 return None
-            key = self._resolve(name)["key"]
+            info = self._resolve(name)
+            if not info or not info.get("species"):
+                return None
+            key = info["key"]
+            old = next((m for m, u in self.member_uid.items() if u == uid), None)
+            crop = self.icon_crops[uid]
+            if self.icons is not None:  # 間違って登録されていたアイコン (同じ絵で別の名前) は消す
+                from .icons import template_feature
+                feat = template_feature(crop)
+                for it in self.icons.list():
+                    if it["key"] != key and self._resolve(it["key"])["species"] != info["species"]:
+                        idx = next(j for j, x in enumerate(self.icons.items) if x["id"] == it["id"])
+                        if float(self.icons.features[idx] @ feat) >= 0.9:
+                            self.icons.remove(it["id"])
+                            log.info("間違っていたアイコンの登録を削除: %s", it["key"])
             self._label_icon_locked(uid, key)
+            if old and old != "icon:" + uid:
+                self.parties["opp"] = [key if m == old else m for m in self.parties["opp"]]
+            self.member_uid.pop(old, None)
+            self.member_uid[key] = uid
+            self.icon_fixed[uid] = key
             self.version += 1
             return key
 
@@ -191,6 +212,8 @@ class State:
             self.icon_guess.clear()
             self.unknown_nicks.clear()  # 未登録ニックネームの入力欄も対戦ごとに消す (登録済みのニックネームは残す)
             self.mega_used.clear()
+            self.member_uid.clear()
+            self.icon_fixed.clear()
             self.version += 1
 
     def snapshot(self, regions):
@@ -218,7 +241,8 @@ class State:
             for side, members in self.parties.items():
                 active = {s["species"] for s in self.slots.values() if s["side"] == side}
                 parties[side] = [dict(self._resolve(m), active=self._resolve(m)["species"] in active,
-                                      guess=side == "opp" and m in guessed)
+                                      guess=side == "opp" and m in guessed,
+                                      uid=self.member_uid.get(m) if side == "opp" else None)
                                  for m in members]
             guesses = {uid: {"types": [type_name_ja(t) for t in g["types"]],
                              "cands": [{"key": c, "display": self._resolve(c)["display"]} for c in g["cands"][:6]],
@@ -460,6 +484,9 @@ class Recognizer(threading.Thread):
                 self.state.type_crops[uid] = tuple(
                     crop_with_margin(frame, _lerp(pv[f"opp_type{k}_first"], pv[f"opp_type{k}_last"], i, n))
                     for k in (1, 2))
+            if uid in self.state.icon_fixed:  # 設定画面で修正済み
+                self.preview_opp[i] = self.state.icon_fixed[uid]
+                continue
             cur = self.preview_opp[i]
             if cur and not cur.startswith("icon:") and uid not in self.state.icon_guess:
                 continue  # 特定済み
@@ -476,6 +503,8 @@ class Recognizer(threading.Thread):
                 pass  # 推定済み (毎フレーム推定し直さない)
             else:
                 self.preview_opp[i] = self.guess_by_types(frame, pv, i, n, uid) or "icon:" + uid
+            if self.preview_opp[i] and not self.preview_opp[i].startswith("icon:"):
+                self.state.member_uid[self.preview_opp[i]] = uid  # 設定画面の「修正」用
             g = self.state.icon_guess.get(uid)
             if g:  # 設定画面の「選出画面の読み取り結果」用
                 self.state.debug[f"icon{i}"]["guess"] = resolve(g["guess"], self.state.usage)["display"] if g.get("guess") else None
