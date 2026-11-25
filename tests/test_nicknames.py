@@ -58,6 +58,17 @@ class TestNicknames(unittest.TestCase):
         self.assertEqual(resolve("nick:しのみや")["display"], "しのみや")
 
 
+class TestResetPerBattle(unittest.TestCase):
+    def test_unknown_cleared_known_kept(self):
+        d = NicknameDB(Path(tempfile.mkdtemp()) / "nicknames.json")
+        st = State(usage(), nicknames=d)
+        st.label_nickname("しのみや", "イエッサン(♀)")
+        st.add_unknown_nick("たろう", "opp")
+        st.reset()  # 新しい対戦
+        self.assertEqual(st.unknown_nicks, {})                       # 未登録の入力欄は消える
+        self.assertEqual(d.match("しのみや"), "Indeedee-F")           # 登録済みは残る
+
+
 class TestPresets(unittest.TestCase):
     def test_fill_and_apply(self):
         cfg = _fill_layout(copy.deepcopy(DEFAULT_CONFIG))

@@ -182,6 +182,7 @@ class State:
             self.icon_crops.clear()
             self.type_crops.clear()
             self.icon_guess.clear()
+            self.unknown_nicks.clear()  # 未登録ニックネームの入力欄も対戦ごとに消す (登録済みのニックネームは残す)
             self.version += 1
 
     def snapshot(self, regions):
