@@ -10,5 +10,8 @@ winrt-Windows.Globalization>=2.0 ; sys_platform == "win32"
 winrt-Windows.Graphics.Imaging>=2.0 ; sys_platform == "win32"
 winrt-Windows.Media.Ocr>=2.0 ; sys_platform == "win32"
 winrt-Windows.Storage.Streams>=2.0 ; sys_platform == "win32"
-# Windows 以外で試す場合は Tesseract (要 jpn 言語データ) を使う
+# Windows の文字認識が使えないときに自動で使う RapidOCR (CPU 版)。GPU で動かすなら setup_gpu.bat
+rapidocr>=3.4
+onnxruntime>=1.20
+# Windows 以外で試す場合は Tesseract (要 jpn 言語データ) も使える
 pytesseract>=0.3.10 ; sys_platform != "win32"

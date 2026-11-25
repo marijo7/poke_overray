@@ -13,7 +13,7 @@
 OBS ブラウザソース ← http://127.0.0.1:8765/overlay ←──┘
 ```
 
-- 画面認識は Windows 標準の日本語 OCR を使うため、追加の AI モデルや GPU は不要です
+- 画面の文字認識は Windows 標準の機能を使います（使えない PC では自動で RapidOCR に切り替わります）。GPU は不要です
 - OBS からスクリーンショットを受け取るので、キャプチャボードを OBS と取り合いません
 - 読み取りに失敗しても、設定画面から手動でポケモンを切り替えられます
 
@@ -22,8 +22,7 @@ OBS ブラウザソース ← http://127.0.0.1:8765/overlay ←──┘
 - Windows 10 / 11
 - [Python 3.10 以降](https://www.python.org/downloads/)（インストール時に「Add python.exe to PATH」にチェック）
 - OBS Studio 28 以降（WebSocket が標準搭載）
-- Windows の日本語 OCR
-  - 設定 → 時刻と言語 → 言語と地域 → 「日本語」の「…」→ 言語のオプション → **光学式文字認識** がインストール済みであること
+- Windows の日本語の文字認識（日本語版 Windows なら通常は入っています。下の「文字認識の確認」参照）
   - 日本語版 Windows なら通常は入っています
 
 ## セットアップ
@@ -46,6 +45,22 @@ OBS ブラウザソース ← http://127.0.0.1:8765/overlay ←──┘
    ```
 
 4. もう一度 `start.bat` を起動
+
+### 文字認識の確認
+
+`check_ocr.bat` をダブルクリックすると、文字認識が使えるか確認できます（テスト画像の「ガブリアス」を読み取ります）。
+
+- 「Windows の文字認識 … 日本語: 使えます」と出れば OK
+- 使えない場合も、自動で **RapidOCR** に切り替わるので、そのまま使えます（初回起動時に認識モデルを自動でダウンロードします）
+- Windows の文字認識を入れたい場合は、**管理者として実行した PowerShell** で次を実行します
+  （Windows 11 の設定画面の「言語のオプション」には文字認識の項目が表示されないため）
+
+  ```powershell
+  # 入っているか確認 (State が Installed なら入っている)
+  Get-WindowsCapability -Online | Where-Object Name -like 'Language.OCR*ja-JP*'
+  # 入れる
+  Add-WindowsCapability -Online -Name "Language.OCR~~~ja-JP~0.0.1.0"
+  ```
 
 ## 使い方
 
@@ -260,7 +275,7 @@ NVIDIA の GPU で CUDA を使う場合は `onnxruntime-gpu` と CUDA / cuDNN �
 |---|---|---|
 | `capture.backend` | `obs` | `obs`（推奨）/ `screen`（デスクトップ直接）/ `file`（画像ファイル・テスト用） |
 | `capture.obs.format` | `jpg` | OBS から受け取る画像形式。`jpg` は `png` より軽い |
-| `ocr.backend` | `windows` | `windows`（標準）/ `rapidocr`（GPU 対応）/ `tesseract` |
+| `ocr.backend` | `auto` | `auto`（Windows の文字認識 → 使えなければ RapidOCR）/ `windows` / `rapidocr`（GPU 対応）/ `tesseract` |
 | `ocr.device` | `dml` | RapidOCR の実行先: `cpu` / `dml`（GPU）/ `cuda` |
 | `ocr.threads` | `1` | RapidOCR を CPU で動かすときのスレッド数（1 が最も低負荷） |
 | `ocr.scale` | 自動 | OCR 前の拡大率（Windows OCR は 2、RapidOCR は 1）。小さい文字が読めないときに調整 |
@@ -275,7 +290,7 @@ NVIDIA の GPU で CUDA を使う場合は `onnxruntime-gpu` と CUDA / cuDNN �
 |---|---|
 | 設定画面に「エラー: ...connect...」 | OBS が起動しているか、WebSocket が有効か、ポート・パスワードが合っているか |
 | 「ソースが見つからない」系のエラー | `config.json` の `source` を OBS のソース名と完全に一致させる |
-| 「日本語 OCR が見つかりません」 | 上記「必要なもの」の光学式文字認識をインストール |
+| 「Windows の文字認識が使えないため RapidOCR を使います」 | そのままで問題なし（RapidOCR で動作）。Windows の文字認識を使いたい場合は「文字認識の確認」参照 |
 | OCR 結果が空・でたらめ | 範囲を名前の文字に合わせ直す / `ocr.scale` を 3 にする |
 | 採用率データがありません | そのポケモンが上位 50 匹に入っていない。手動で `data/usage.json` に追加可能 |
 

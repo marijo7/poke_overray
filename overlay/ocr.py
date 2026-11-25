@@ -1,7 +1,10 @@
 """OCR バックエンド。Windows 標準 OCR / RapidOCR (GPU 対応) / Tesseract。"""
 import asyncio
+import logging
 
 from PIL import Image, ImageOps
+
+log = logging.getLogger(__name__)
 
 
 def preprocess(img: Image.Image, scale: float) -> Image.Image:
@@ -27,8 +30,8 @@ class WindowsOcr:
         self.engine = OcrEngine.try_create_from_language(Language(lang))
         if self.engine is None:
             raise RuntimeError(
-                "Windows の日本語 OCR が見つかりません。設定 > 時刻と言語 > 言語 で「日本語」を追加し、"
-                "言語オプションで「光学式文字認識」がインストールされているか確認してください。")
+                "Windows の日本語 OCR が見つかりません。check_ocr.bat で状態を確認してください "
+                "(README の「文字認識の確認」に入れ方があります)")
         self.loop = asyncio.new_event_loop()
 
     def recognize(self, img: Image.Image):
@@ -116,7 +119,14 @@ class RapidOcr:
 
 
 def create_ocr(cfg: dict):
-    backend = cfg.get("backend", "windows")
+    backend = cfg.get("backend", "auto")
+    if backend == "auto":
+        # Windows 標準 OCR が使えればそれ (追加のモデル不要・軽い)、使えなければ RapidOCR
+        try:
+            return WindowsOcr(cfg.get("lang", "ja"))
+        except Exception as e:  # winrt 未導入・日本語 OCR 未インストール・Windows 以外
+            log.warning("Windows の文字認識が使えないため RapidOCR を使います (%s)", e)
+        return RapidOcr(cfg.get("device", "cpu"), cfg.get("threads", 1))
     if backend == "windows":
         return WindowsOcr(cfg.get("lang", "ja"))
     if backend == "rapidocr":
