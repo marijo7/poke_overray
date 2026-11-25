@@ -28,7 +28,9 @@ DEFAULT_CONFIG = {
     "server": {"host": "127.0.0.1", "port": 8765},
     # 採用率データの取得元。source: championsbattledata (性格・能力ポイントあり、毎日更新) / pikalytics
     # format: Doubles / Singles (championsbattledata)。pikalytics_format: Pikalytics のフォーマットコード
-    "usage": {"source": "championsbattledata", "format": "Doubles", "pikalytics_format": "gen9championsvgc2026regmc"},
+    # update_hour_utc: データ元の毎日の更新時刻 (UTC)。これより後に取得済みなら再取得しない。5 = 日本時間 14:00
+    "usage": {"source": "championsbattledata", "format": "Doubles", "pikalytics_format": "gen9championsvgc2026regmc",
+              "update_hour_utc": 5},
     # 選出画面の読み取り。マーカー (「4匹 選出してください」の行) に keywords が含まれていたら選出画面と判断し、
     # 相手のアイコン 6 つを登録済みアイコンと照合、自分のポケモン名 6 つを OCR する。
     # *_first / *_last は 1 匹目と 6 匹目の範囲 (間は等間隔で補間)。既定値はスマホ版の画面 (約 2.17:1) に合わせたもの

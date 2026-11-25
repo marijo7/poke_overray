@@ -12,7 +12,8 @@
     python tools/update_usage.py --source pikalytics --list-formats
     python tools/update_usage.py --force                  # 今日すでに取得済みでも取得し直す
 
-同じデータ元・形式のデータを今日すでに取得している場合は、データ元に負荷をかけないよう取得しない (1 日 1 回まで)。
+データ元に負荷をかけないよう、前回の取得以降にデータ元が更新されていなければ取得しない
+(データ元の更新は毎日 04:40 UTC = 日本時間 13:40 頃。区切りは config.json の usage.update_hour_utc、既定 5 = 日本時間 14:00)。
 """
 import argparse
 import datetime
@@ -151,17 +152,29 @@ def fetch_cbd(fmt, limit, delay):
 SOURCE_NAMES = {"championsbattledata": "Pokémon Champions Battle Data", "pikalytics": "Pikalytics"}
 
 
-def fetched_today(path: Path, source: str, fmt: str, today=None):
-    """path のデータが、同じデータ元・形式で今日 (PC の日付) 取得したものなら、その取得日時を返す。違えば None。"""
-    today = today or datetime.date.today()
+def last_update(now: datetime.datetime, hour_utc: float) -> datetime.datetime:
+    """直近のデータ更新時刻 (UTC の hour_utc 時)。データ元は毎日 04:40 UTC 頃に更新されるので、既定は余裕を見て 5:00 UTC。"""
+    now = now.astimezone(datetime.timezone.utc)
+    t = now.replace(hour=int(hour_utc), minute=int(hour_utc % 1 * 60), second=0, microsecond=0)
+    return t if now >= t else t - datetime.timedelta(days=1)
+
+
+def fetched_since_update(path: Path, source: str, fmt: str, now=None, hour_utc: float = 5.0):
+    """前回の取得 (同じデータ元・形式) が、直近のデータ更新より後なら、その取得日時を返す (= 取り直しても同じデータ)。
+
+    区切りを PC の日付ではなくデータ元の更新時刻にしているので、午前に取得しても、更新後の午後にもう一度取得できる。
+    """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
     try:
         meta = json.loads(path.read_text(encoding="utf-8")).get("meta", {})
         fetched = datetime.datetime.fromisoformat(meta["fetched_at"])
     except (OSError, ValueError, KeyError, TypeError):
         return None  # データが無い・壊れている → 取得する
-    same_source = meta.get("source_id", None) == source or meta.get("source") == SOURCE_NAMES[source]
+    if fetched.tzinfo is None:
+        fetched = fetched.astimezone()  # 以前の形式 (タイムゾーン無し) は PC の時刻として扱う
+    same_source = meta.get("source_id") == source or meta.get("source") == SOURCE_NAMES[source]
     same_format = (meta.get("format_requested") or meta.get("format") or "").split(" ")[0].lower() == fmt.lower()
-    if fetched.date() == today and same_source and same_format:
+    if same_source and same_format and fetched >= last_update(now, hour_utc):
         return fetched
     return None
 
@@ -192,10 +205,13 @@ def main():
         fmt = args.format or ucfg.get("pikalytics_format") or "gen9championsvgc2026regmc"
     out = Path(args.out) if args.out else ROOT / "data" / "usage.json"
 
-    done = None if args.force else fetched_today(out, source, fmt)
+    hour_utc = float(ucfg.get("update_hour_utc", 5.0))
+    done = None if args.force else fetched_since_update(out, source, fmt, hour_utc=hour_utc)
     if done:
-        print(f"今日 ({done:%m/%d %H:%M}) すでに {SOURCE_NAMES[source]} / {fmt} のデータを取得済みのため、取得しません。")
-        print("取得し直す場合は --force を付けて実行してください (update_usage.bat --force)。")
+        now = datetime.datetime.now(datetime.timezone.utc)
+        nxt = (last_update(now, hour_utc) + datetime.timedelta(days=1)).astimezone()
+        print(f"前回の取得 ({done.astimezone():%m/%d %H:%M}) 以降、データ元はまだ更新されていないため、取得しません。")
+        print(f"次の更新: {nxt:%m/%d %H:%M} 頃。取得し直す場合は --force を付けて実行してください (update_usage.bat --force)。")
         return
 
     print(f"データ元: {SOURCE_NAMES[source]} / {fmt}")
@@ -206,7 +222,7 @@ def main():
     if not result:
         sys.exit("採用率データを取得できませんでした")
 
-    meta["fetched_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    meta["fetched_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")  # タイムゾーン付き
     meta["source_id"], meta["format_requested"] = source, fmt  # 次回の「今日取得済み」判定に使う
     out.write_text(json.dumps({"meta": meta, "pokemon": result}, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"保存しました: {out} ({len(result)} 匹)")

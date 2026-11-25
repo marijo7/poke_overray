@@ -39,7 +39,9 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestFetchOncePerDay(unittest.TestCase):
+class TestFetchOncePerUpdate(unittest.TestCase):
+    """区切りはデータ元の更新時刻 (既定 5:00 UTC = 日本時間 14:00)"""
+
     def write(self, meta):
         import json
         import tempfile
@@ -48,24 +50,32 @@ class TestFetchOncePerDay(unittest.TestCase):
         f.write_text(json.dumps({"meta": meta, "pokemon": []}), encoding="utf-8")
         return f
 
-    def test_rules(self):
+    def jst(self, s):
         import datetime
-        today = datetime.date(2026, 11, 25)
-        f = self.write({"source_id": "championsbattledata", "format_requested": "Doubles",
-                        "fetched_at": "2026-11-25T06:40:15"})
-        self.assertIsNotNone(update_usage.fetched_today(f, "championsbattledata", "Doubles", today))  # 今日・同じ → 取得しない
-        self.assertIsNone(update_usage.fetched_today(f, "championsbattledata", "Singles", today))     # 形式が違う → 取得する
-        self.assertIsNone(update_usage.fetched_today(f, "pikalytics", "Doubles", today))             # データ元が違う → 取得する
-        self.assertIsNone(update_usage.fetched_today(f, "championsbattledata", "Doubles",
-                                                     datetime.date(2026, 11, 26)))                   # 翌日 → 取得する
+        return datetime.datetime.fromisoformat(s + "+09:00")
+
+    def check(self, fetched, now, source="championsbattledata", fmt="Doubles"):
+        f = self.write({"source_id": "championsbattledata", "format_requested": "Doubles", "fetched_at": fetched})
+        return update_usage.fetched_since_update(f, source, fmt, now=self.jst(now))
+
+    def test_boundary_is_update_time(self):
+        # 午前に取得 → 午後 (更新後) はもう一度取得できる
+        self.assertIsNotNone(self.check("2026-11-25T09:00:00+09:00", "2026-11-25T12:00"))  # まだ更新前 → 取得しない
+        self.assertIsNone(self.check("2026-11-25T09:00:00+09:00", "2026-11-25T15:00"))     # 更新後 → 取得する
+        # 午後に取得 → 翌日の午前 (次の更新前) は取得しない、翌日午後は取得する
+        self.assertIsNotNone(self.check("2026-11-25T15:00:00+09:00", "2026-11-26T10:00"))
+        self.assertIsNone(self.check("2026-11-25T15:00:00+09:00", "2026-11-26T14:30"))
+
+    def test_source_and_format(self):
+        self.assertIsNone(self.check("2026-11-25T15:00:00+09:00", "2026-11-25T16:00", fmt="Singles"))
+        self.assertIsNone(self.check("2026-11-25T15:00:00+09:00", "2026-11-25T16:00", source="pikalytics"))
 
     def test_old_meta_and_missing_file(self):
         import datetime
         from pathlib import Path
-        today = datetime.date(2026, 11, 25)
-        # 以前の形式のデータ (source_id が無い) でも判定できる
+        # 以前の形式 (source_id もタイムゾーンも無い) でも判定できる
         f = self.write({"source": "Pokémon Champions Battle Data", "format": "Doubles M7",
-                        "fetched_at": "2026-11-25T06:40:15"})
-        self.assertIsNotNone(update_usage.fetched_today(f, "championsbattledata", "Doubles", today))
-        self.assertIsNone(update_usage.fetched_today(Path("/nonexistent/usage.json"), "championsbattledata",
-                                                     "Doubles", today))
+                        "fetched_at": datetime.datetime.now().isoformat(timespec="seconds")})
+        self.assertIsNotNone(update_usage.fetched_since_update(f, "championsbattledata", "Doubles"))
+        self.assertIsNone(update_usage.fetched_since_update(Path("/nonexistent/usage.json"), "championsbattledata",
+                                                            "Doubles"))
