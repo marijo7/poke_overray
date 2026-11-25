@@ -6,7 +6,7 @@ import threading
 import time
 
 from .capture import create_capture
-from .names import NameMatcher
+from .names import NameMatcher, normalize, resolve
 from .ocr import create_ocr, preprocess
 
 log = logging.getLogger(__name__)
@@ -15,11 +15,14 @@ log = logging.getLogger(__name__)
 class State:
     """オーバーレイに配信する状態。スレッド間で共有する。"""
 
-    def __init__(self, usage_db):
+    PARTY_SIZE = 6
+
+    def __init__(self, usage_db, my_party=None):
         self.usage = usage_db
         self.lock = threading.Lock()
-        self.slots = {}        # region id -> {"key", "species", "source", "updated"}
-        self.history = []      # この対戦で見た相手 (usage key または種族名)
+        self.slots = {}        # region id -> {"ident", "species", "side", "source", "updated"}
+        # パーティ (識別子 = 採用率データのキー or 日本語名)。自分は config に保存、相手は対戦ごとにリセット
+        self.parties = {"me": list(my_party or [])[: self.PARTY_SIZE], "opp": []}
         self.debug = {}        # region id -> {"text", "match", "score"}
         self.status = {"capture": "未接続", "ocr": "-", "error": None, "fps": 0.0, "paused": False}
         # 負荷: 取得/OCR にかかった時間 (ms, 移動平均) と、このプログラム全体の CPU 使用率 (PC 全体に対する %)
@@ -38,26 +41,37 @@ class State:
         thumb.save(buf, "JPEG", quality=80)
         return buf.getvalue()
 
-    def set_slot(self, region_id, species=None, key=None, source="auto"):
+    def _resolve(self, ident):
+        """識別子 → 表示情報。日本語の種族名なら採用率データの該当フォルムに寄せる。"""
+        info = resolve(ident, self.usage)
+        if info and not info["has_data"]:
+            entry = self.usage.find_by_species(info["species"])
+            if entry and normalize(info["display"]) == normalize(info["species"]):
+                info = resolve(entry["key"], self.usage)
+        return info
+
+    def set_slot(self, region_id, ident=None, side="opp", source="auto"):
         with self.lock:
-            entry = self.usage.get(key) if key else (self.usage.find_by_species(species) if species else None)
-            if species is None and key is None:
+            if not ident:
                 self.slots.pop(region_id, None)
             else:
-                self.slots[region_id] = {
-                    "key": entry["key"] if entry else None,
-                    "species": entry["species"] if entry else species,
-                    "source": source, "updated": time.time(),
-                }
-                ident = entry["key"] if entry else species
-                if ident not in self.history:
-                    self.history.append(ident)
+                info = self._resolve(ident)
+                self.slots[region_id] = {"ident": info["key"], "species": info["species"], "side": side,
+                                         "source": source, "updated": time.time()}
+                party = self.parties["opp"]
+                if side == "opp" and all(self._resolve(m)["species"] != info["species"] for m in party):
+                    party.append(info["key"])
+            self.version += 1
+
+    def set_party(self, side, members):
+        with self.lock:
+            self.parties[side] = [m for m in members if m][: self.PARTY_SIZE * 2]
             self.version += 1
 
     def reset(self):
         with self.lock:
             self.slots.clear()
-            self.history.clear()
+            self.parties["opp"].clear()
             self.version += 1
 
     def snapshot(self, regions):
@@ -65,19 +79,23 @@ class State:
             slots = []
             for r in regions:
                 s = self.slots.get(r["id"])
-                entry = self.usage.get(s["key"]) if s and s["key"] else None
+                info = self._resolve(s["ident"]) if s else None
                 slots.append({
-                    "id": r["id"], "label": r.get("label", r["id"]),
+                    "id": r["id"], "label": r.get("label", r["id"]), "side": r.get("side", "opp"),
                     "species": s["species"] if s else None,
+                    "display": info["display"] if info else None,
+                    "sprite": info["sprite"] if info else None,
                     "source": s["source"] if s else None,
-                    "pokemon": entry,
+                    "pokemon": self.usage.get(info["key"]) if info else None,
                     "debug": self.debug.get(r["id"]),
                 })
-            history = []
-            for ident in self.history:
-                e = self.usage.get(ident)
-                history.append({"key": ident, "display": e["display"] if e else ident, "has_data": bool(e)})
-            return {"version": self.version, "slots": slots, "history": history,
+            parties = {}
+            for side, members in self.parties.items():
+                active = {s["species"] for s in self.slots.values() if s["side"] == side}
+                parties[side] = [dict(self._resolve(m), active=self._resolve(m)["species"] in active)
+                                 for m in members]
+            return {"version": self.version, "slots": slots, "parties": parties,
+                    "history": parties["opp"],  # 旧形式との互換
                     "status": dict(self.status), "perf": dict(self.perf), "usage_meta": self.usage.meta}
 
 
@@ -163,7 +181,7 @@ class Recognizer(threading.Thread):
             current = self.state.slots.get(r["id"])
             if count >= need and (current is None or current["species"] != species):
                 log.info("%s: %s (%.2f) ← %r", r["id"], species, score, text)
-                self.state.set_slot(r["id"], species=species, source="auto")
+                self.state.set_slot(r["id"], ident=species, side=r.get("side", "opp"), source="auto")
 
 
 def _ema(prev, value, k=0.2):

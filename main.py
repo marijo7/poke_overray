@@ -4,6 +4,7 @@
 
 起動後:
   オーバーレイ (OBS ブラウザソースに追加): http://127.0.0.1:8765/overlay
+  パーティ表示 (OBS ブラウザソースに追加): http://127.0.0.1:8765/party
   設定・調整画面 (普通のブラウザで開く):  http://127.0.0.1:8765/control
 """
 import argparse
@@ -34,7 +35,7 @@ def main():
         logging.info("採用率データ: %s %s (%d 匹, 取得 %s)", m.get("format"), m.get("data_date"),
                      len(usage.entries), m.get("fetched_at"))
 
-    state = State(usage)
+    state = State(usage, cfg.get("my_party"))
     recognizer = None
     if not args.no_recognize:
         recognizer = Recognizer(state, lambda: cfg)
@@ -46,6 +47,7 @@ def main():
     httpd = serve(app)
     base = f"http://{cfg['server']['host']}:{cfg['server']['port']}"
     print(f"\n  オーバーレイ (OBS ブラウザソース): {base}/overlay")
+    print(f"  パーティ表示 (OBS ブラウザソース): {base}/party")
     print(f"  設定・調整画面:                   {base}/control\n  終了は Ctrl+C\n")
     try:
         httpd.serve_forever()

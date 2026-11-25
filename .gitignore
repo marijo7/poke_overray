@@ -5,3 +5,5 @@ __pycache__/
 config.json
 # 採用率データは tools/update_usage.py で各自取得する
 data/usage.json
+# ポケモン画像のキャッシュ (初回表示時に取得)
+data/sprites/

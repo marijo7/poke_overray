@@ -41,15 +41,28 @@ def build_map(rows, kanji):
     return out
 
 
+def species_ids(rows):
+    """英語の種族名 → 全国図鑑番号 (= 通常フォルムの画像 ID)"""
+    return {row[2]: int(row[0]) for row in rows if row[1] == LANG_EN}
+
+
+def form_ids(rows):
+    """フォルム違いの識別子 (例 charizard-mega-y) → ポケモン ID (画像 ID)"""
+    return {row[1]: int(row[0]) for row in rows if row[7] == "0"}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kanji", action="store_true", help="技・持ち物・特性を漢字表記にする")
     args = ap.parse_args()
 
     print("PokeAPI からダウンロード中...", file=sys.stderr)
+    species_rows = fetch_csv("pokemon_species_names")
     data = {
         "source": "PokeAPI (https://pokeapi.co/)",
-        "pokemon": build_map(fetch_csv("pokemon_species_names"), False),
+        "pokemon": build_map(species_rows, False),
+        "species_id": species_ids(species_rows),
+        "forms": form_ids(fetch_csv("pokemon")),
         "moves": build_map(fetch_csv("move_names"), args.kanji),
         "items": build_map(fetch_csv("item_names"), args.kanji),
         "abilities": build_map(fetch_csv("ability_names"), args.kanji),

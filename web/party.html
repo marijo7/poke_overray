@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>パーティ表示</title>
+<!--
+  OBS のブラウザソースに http://127.0.0.1:8765/party を指定して使う。
+  URL パラメータ:
+    side=both|me|opp   表示するパーティ (既定 both)
+    layout=column      縦一列に並べる (画面の左右端に置く用。既定は横並び)
+    size=80            画像の大きさ (px)
+    names=0            名前を非表示
+    label=0            「自分」「相手」の見出しを非表示
+    scale=1.2 / theme=light
+-->
+<style>
+  :root {
+    --bg: rgba(16, 18, 28, 0.82);
+    --tile: rgba(255, 255, 255, 0.07);
+    --fg: #f4f6fb;
+    --sub: #a9b0c4;
+    --me: #4f8cff;
+    --opp: #ff6b6b;
+    --border: rgba(255, 255, 255, 0.14);
+    --size: 80px;
+    --scale: 1;
+  }
+  :root[data-theme="light"] {
+    --bg: rgba(250, 251, 255, 0.92);
+    --tile: rgba(0, 0, 0, 0.05);
+    --fg: #1b1f2c;
+    --sub: #5b6377;
+    --border: rgba(0, 0, 0, 0.12);
+  }
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  body { font-family: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif; color: var(--fg); zoom: var(--scale); }
+  #root { display: flex; flex-direction: column; gap: 10px; padding: 8px; align-items: flex-start; }
+  #root.column { flex-direction: row; align-items: flex-start; }
+  .party { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px 10px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35); }
+  .title { font-size: 13px; font-weight: 800; letter-spacing: 0.15em; margin: 0 2px 6px; }
+  .me .title { color: var(--me); }
+  .opp .title { color: var(--opp); }
+  .tiles { display: flex; gap: 6px; }
+  .column .tiles { flex-direction: column; }
+  .tile {
+    position: relative; width: var(--size); display: flex; flex-direction: column; align-items: center;
+    background: var(--tile); border: 2px solid transparent; border-radius: 10px; padding: 4px 2px 3px;
+    transition: border-color 0.25s, box-shadow 0.25s, opacity 0.25s;
+  }
+  .tile img { width: var(--size); height: var(--size); object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5)); }
+  .tile .ph { width: var(--size); height: var(--size); display: grid; place-items: center; font-size: calc(var(--size) * 0.4); color: var(--sub); opacity: 0.5; }
+  .tile .nm { font-size: 11px; line-height: 14px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 2px; }
+  .me .tile.active { border-color: var(--me); box-shadow: 0 0 12px var(--me); }
+  .opp .tile.active { border-color: var(--opp); box-shadow: 0 0 12px var(--opp); }
+  .tile.new { animation: pop 0.4s ease-out; }
+  .hide-names .nm { display: none; }
+  @keyframes pop { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const side = q.get("side") || "both";
+  const root = document.getElementById("root");
+  if (q.get("layout") === "column") root.classList.add("column");
+  if (q.get("names") === "0") root.classList.add("hide-names");
+  if (q.get("size")) document.documentElement.style.setProperty("--size", parseInt(q.get("size"), 10) + "px");
+  if (q.get("scale")) document.documentElement.style.setProperty("--scale", q.get("scale"));
+  if (q.get("theme")) document.documentElement.dataset.theme = q.get("theme");
+  const showLabel = q.get("label") !== "0";
+  const SIZE = 6;
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  let prevKeys = { me: [], opp: [] };
+
+  function tiles(members, key) {
+    const out = [];
+    for (let i = 0; i < SIZE; i++) {
+      const m = members[i];
+      if (!m) { out.push(`<div class="tile"><div class="ph">?</div><div class="nm">&nbsp;</div></div>`); continue; }
+      const isNew = !prevKeys[key].includes(m.key);
+      const img = m.sprite ? `<img src="/sprite/${m.sprite}.png" alt="" onerror="this.outerHTML='<div class=ph>?</div>'">` : `<div class="ph">?</div>`;
+      out.push(`<div class="tile${m.active ? " active" : ""}${isNew ? " new" : ""}" title="${esc(m.display)}">${img}<div class="nm">${esc(m.display)}</div></div>`);
+    }
+    return out.join("");
+  }
+
+  function party(key, title, members) {
+    return `<div class="party ${key}">${showLabel ? `<div class="title">${title}</div>` : ""}<div class="tiles">${tiles(members, key)}</div></div>`;
+  }
+
+  let lastSig = "";
+  async function tick() {
+    try {
+      const st = await (await fetch("/api/state", { cache: "no-store" })).json();
+      const p = st.parties;
+      const sig = JSON.stringify(p);
+      if (sig !== lastSig) {
+        lastSig = sig;
+        let html = "";
+        if (side !== "opp") html += party("me", "自分", p.me);
+        if (side !== "me") html += party("opp", "相手", p.opp);
+        root.innerHTML = html;
+        prevKeys = { me: p.me.map((m) => m.key), opp: p.opp.map((m) => m.key) };
+      }
+    } catch (e) { /* サーバー停止中 */ }
+    setTimeout(tick, 500);
+  }
+  tick();
+</script>
+</body>
+</html>

@@ -6,7 +6,8 @@
 <!--
   OBS のブラウザソースに http://127.0.0.1:8765/overlay を指定して使う。
   URL パラメータ:
-    slot=opp1          表示する領域 ID (カンマ区切りで複数可。省略時は全て)
+    slot=opp1          表示する領域 ID (カンマ区切りで複数可。省略時は相手側の領域すべて)
+    sprite=0           ポケモンの画像を非表示
     moves=6 items=3 abilities=2   表示件数 (0 で非表示)
     layout=row         カードを横並びにする (既定は縦並び)
     history=1          この対戦で見た相手の一覧を表示
@@ -48,9 +49,11 @@
     animation: pop 0.35s ease-out;
   }
   @keyframes pop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
-  .head { display: flex; align-items: baseline; gap: 8px; border-bottom: 2px solid var(--accent); padding-bottom: 4px; margin-bottom: 6px; }
-  .name { font-size: 22px; font-weight: 800; letter-spacing: 0.02em; }
-  .rank { margin-left: auto; font-size: 12px; color: var(--sub); white-space: nowrap; }
+  .head { display: flex; align-items: center; gap: 8px; border-bottom: 2px solid var(--accent); padding-bottom: 4px; margin-bottom: 6px; }
+  .head img { width: 44px; height: 44px; object-fit: contain; margin: -6px 0 -4px -4px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.5)); }
+  .title { min-width: 0; }
+  .name { font-size: 22px; font-weight: 800; letter-spacing: 0.02em; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rank { font-size: 12px; color: var(--sub); white-space: nowrap; }
   .sec-title { font-size: 11px; color: var(--accent); font-weight: 700; margin: 6px 0 2px; letter-spacing: 0.1em; }
   .row-item { position: relative; display: flex; justify-content: space-between; font-size: 15px; line-height: 22px; padding: 0 6px; margin: 2px 0; border-radius: 4px; background: var(--bar-bg); overflow: hidden; }
   .row-item .fill { position: absolute; inset: 0 auto 0 0; background: var(--bar); opacity: 0.45; border-radius: 4px; }
@@ -73,6 +76,7 @@
     moves: +(q.get("moves") ?? 6),
     items: +(q.get("items") ?? 3),
     abilities: +(q.get("abilities") ?? 2),
+    sprite: q.get("sprite") !== "0",
   };
   if (q.get("layout") === "row") document.getElementById("cards").classList.add("row");
   if (q.get("history") === "1") document.getElementById("history").classList.add("show");
@@ -89,16 +93,18 @@
     return `<div class="sec-title">${title}</div>${rows}`;
   }
 
+  const img = (slot) => (opt.sprite && slot.sprite ? `<img src="/sprite/${slot.sprite}.png" alt="" onerror="this.remove()">` : "");
+
   function card(slot, meta) {
     const p = slot.pokemon;
     if (!p) {
-      return `<div class="card"><div class="head"><div class="name">${esc(slot.species)}</div></div>
+      return `<div class="card"><div class="head">${img(slot)}<div class="title"><div class="name">${esc(slot.display || slot.species)}</div></div></div>
         <div class="nodata">採用率データがありません</div></div>`;
     }
     const rank = p.rank ? `使用率 ${p.rank}位${p.usage != null ? ` (${p.usage.toFixed(1)}%)` : ""}` : "";
     const credit = meta && meta.source ? `データ: ${esc(meta.source)} ${esc(meta.format || "")} ${esc(meta.data_date || "")}` : "";
     return `<div class="card">
-      <div class="head"><div class="name">${esc(p.display)}</div><div class="rank">${rank}</div></div>
+      <div class="head">${img(slot)}<div class="title"><div class="name">${esc(p.display)}</div><div class="rank">${rank}</div></div></div>
       ${section("技", p.moves, opt.moves)}
       ${section("持ち物", p.items, opt.items)}
       ${section("特性", p.abilities, opt.abilities)}
@@ -109,8 +115,8 @@
   async function tick() {
     try {
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
-      const slots = st.slots.filter((s) => s.species && (!opt.slots || opt.slots.includes(s.id)));
-      const sig = JSON.stringify([slots.map((s) => [s.id, s.species, s.pokemon && s.pokemon.key]), st.history, st.usage_meta]);
+      const slots = st.slots.filter((s) => s.species && (opt.slots ? opt.slots.includes(s.id) : s.side === "opp"));
+      const sig = JSON.stringify([slots.map((s) => [s.id, s.display, s.sprite, s.pokemon && s.pokemon.key]), st.history, st.usage_meta]);
       if (sig !== lastSig) {
         lastSig = sig;
         document.getElementById("cards").innerHTML = slots.map((s) => card(s, st.usage_meta)).join("");

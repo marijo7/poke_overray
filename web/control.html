@@ -42,6 +42,13 @@
   .slot .ctl { display: flex; gap: 6px; margin-top: 4px; }
   .slot .ctl input { flex: 1; min-width: 0; }
   .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--line); color: var(--sub); margin-left: 6px; font-weight: 400; }
+  .party-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .party-grid input { width: 100%; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; }
+  .chip { display: inline-flex; align-items: center; gap: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 1px 4px 1px 4px; }
+  .chip img { width: 28px; height: 28px; object-fit: contain; }
+  .chip button { border: 0; background: transparent; padding: 0 6px; color: var(--sub); }
+  .chip.active { border-color: var(--accent); }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
 </style>
@@ -80,17 +87,28 @@
         <button id="pause">認識を一時停止</button>
         <button id="reload">採用率データ再読込</button>
       </div>
-      <p class="hint">「対戦リセット」で表示中のポケモンと、この対戦で見た相手の履歴を消します。</p>
+      <p class="hint">「対戦リセット」で表示中のポケモンと、相手のパーティを消します。</p>
     </div>
     <div class="panel">
-      <h2>この対戦で見た相手</h2>
-      <div id="history" class="hint">まだありません</div>
+      <h2>自分のパーティ</h2>
+      <div class="party-grid" id="myparty"></div>
+      <div class="row" style="margin-top:8px"><button class="primary" id="savemy">保存</button><span id="mysaved" class="hint"></span></div>
+      <p class="hint">一度登録すれば次回起動時も残ります。</p>
+    </div>
+    <div class="panel">
+      <h2>相手のパーティ</h2>
+      <div class="chips" id="oppparty"></div>
+      <div class="ctl row" style="margin-top:8px"><input list="pokelist" id="oppadd" placeholder="追加 (名前を入力して Enter)" style="flex:1;min-width:0"></div>
+      <p class="hint">認識したポケモンは自動で追加されます。選出画面を見て手入力しておくと 6 匹すべて表示できます。「対戦リセット」で空になります。</p>
     </div>
     <div class="panel">
       <h2>OBS への追加</h2>
       <p class="hint" style="margin-top:0">ソース追加 → ブラウザ → URL に以下を入力。幅 340 / 高さ 1080 程度。</p>
       <p><code id="url"></code></p>
-      <p class="hint">例: <code>?slot=opp1</code> で領域ごとに別ソースにできます。<code>&amp;layout=row</code> 横並び、<code>&amp;history=1</code> 履歴表示、<code>&amp;moves=4</code> 技の表示数。</p>
+      <p class="hint">例: <code>?slot=opp1</code> で領域ごとに別ソースにできます。<code>&amp;layout=row</code> 横並び、<code>&amp;moves=4</code> 技の表示数。</p>
+      <p class="hint" style="margin-bottom:0">パーティ表示 (幅 560 / 高さ 260 程度):</p>
+      <p><code id="partyurl"></code></p>
+      <p class="hint"><code>?side=opp</code> 相手だけ、<code>?layout=column</code> 縦並び、<code>&amp;size=64</code> 画像サイズ。</p>
     </div>
   </section>
 </main>
@@ -101,11 +119,11 @@
   const fmt = (v) => (v == null ? "-" : Math.round(v));
   const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }).then((r) => r.json());
   $("url").textContent = location.origin + "/overlay";
+  $("partyurl").textContent = location.origin + "/party";
 
   let regions = [];
   let selected = 0;
   let dirty = false;
-  let pokemon = [];
 
   // ---- 領域一覧 ----
   function renderRegions() {
@@ -114,6 +132,9 @@
         <td><input type="radio" name="sel" ${i === selected ? "checked" : ""} data-i="${i}"></td>
         <td><input type="text" value="${esc(r.id)}" data-i="${i}" data-k="id" title="ID (URL の slot= に使う)"></td>
         <td><input type="text" value="${esc(r.label)}" data-i="${i}" data-k="label" title="表示名"></td>
+        <td><select data-i="${i}" data-k="side" title="どちらのポケモン名か">
+          <option value="opp" ${r.side !== "me" ? "selected" : ""}>相手</option>
+          <option value="me" ${r.side === "me" ? "selected" : ""}>自分</option></select></td>
         <td><button data-del="${i}" title="削除">×</button></td>
       </tr>`).join("");
     const stage = $("stage");
@@ -140,7 +161,7 @@
   });
   $("add").onclick = () => {
     const n = regions.length + 1;
-    regions.push({ id: "opp" + n, label: "相手" + n, x: 0.4, y: 0.4, w: 0.15, h: 0.05 });
+    regions.push({ id: "r" + n, label: "領域" + n, side: "opp", x: 0.4, y: 0.4, w: 0.15, h: 0.05 });
     selected = regions.length - 1; dirty = true; renderRegions();
   };
   $("save").onclick = async () => {
@@ -165,7 +186,7 @@
   function renderSlots(st) {
     $("slots").innerHTML = st.slots.map((s) => {
       const d = s.debug || {};
-      const name = s.pokemon ? s.pokemon.display : (s.species || "—");
+      const name = s.display || s.species || "—";
       const src = s.source ? `<span class="tag">${s.source === "manual" ? "手動" : "自動"}</span>` : "";
       return `<div class="slot" data-id="${esc(s.id)}">
         <div><span class="hint">${esc(s.label)}</span></div>
@@ -177,8 +198,7 @@
   }
   $("slots").addEventListener("change", async (e) => {
     const slot = e.target.dataset.slot; if (!slot) return;
-    const p = pokemon.find((p) => p.display === e.target.value);
-    await post("/api/slot", p ? { id: slot, key: p.key } : { id: slot, species: e.target.value });
+    await post("/api/slot", { id: slot, ident: e.target.value.trim() });
     e.target.value = ""; lastSig = "";
   });
   $("slots").addEventListener("click", async (e) => {
@@ -189,11 +209,40 @@
   $("pause").onclick = async () => { const r = await post("/api/pause", { paused: $("pause").dataset.p !== "1" }); };
 
   async function loadPokemon() {
-    pokemon = await (await fetch("/api/pokemon")).json();
-    $("pokelist").innerHTML = pokemon.map((p) => `<option value="${esc(p.display)}">`).join("");
+    const names = await (await fetch("/api/names")).json();
+    $("pokelist").innerHTML = names.map((n) => `<option value="${esc(n)}">`).join("");
   }
 
-  let lastSig = "";
+  // ---- パーティ ----
+  let myLoaded = false, oppParty = [];
+  function renderMyParty(members) {
+    $("myparty").innerHTML = Array.from({ length: 6 }, (_, i) =>
+      `<input list="pokelist" placeholder="${i + 1}匹目" value="${esc(members[i] ? members[i].display : "")}">`).join("");
+  }
+  $("savemy").onclick = async () => {
+    const members = [...$("myparty").querySelectorAll("input")].map((x) => x.value.trim()).filter(Boolean);
+    const r = await post("/api/party", { side: "me", members });
+    $("mysaved").textContent = r.ok ? "保存しました" : "失敗: " + r.error;
+    setTimeout(() => ($("mysaved").textContent = ""), 2000);
+  };
+  function renderOppParty(members) {
+    oppParty = members.map((m) => m.key);
+    $("oppparty").innerHTML = members.length ? members.map((m, i) => `<span class="chip${m.active ? " active" : ""}">
+      ${m.sprite ? `<img src="/sprite/${m.sprite}.png" alt="" onerror="this.remove()">` : ""}${esc(m.display)}
+      <button data-rm="${i}" title="削除">×</button></span>`).join("") : '<span class="hint">まだありません</span>';
+  }
+  $("oppparty").addEventListener("click", (e) => {
+    if (e.target.dataset.rm === undefined) return;
+    const members = oppParty.filter((_, i) => i !== +e.target.dataset.rm);
+    post("/api/party", { side: "opp", members });
+  });
+  $("oppadd").addEventListener("change", async (e) => {
+    const v = e.target.value.trim(); if (!v) return;
+    await post("/api/party", { side: "opp", members: [...oppParty, v] });
+    e.target.value = "";
+  });
+
+  let lastSig = "", lastOpp = "";
   async function tick() {
     try {
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
@@ -209,7 +258,9 @@
       // 入力中は再描画しない
       const sig = JSON.stringify(st.slots);
       if (sig !== lastSig && !$("slots").contains(document.activeElement)) { lastSig = sig; renderSlots(st); }
-      $("history").innerHTML = st.history.length ? st.history.map((h) => esc(h.display)).join("、") : "まだありません";
+      if (!myLoaded) { renderMyParty(st.parties.me); myLoaded = true; }
+      const oppSig = JSON.stringify(st.parties.opp);
+      if (oppSig !== lastOpp) { lastOpp = oppSig; renderOppParty(st.parties.opp); }
       const img = new Image();
       img.onload = () => { $("frame").src = img.src; $("noframe").style.display = "none"; };
       img.src = "/api/frame.jpg?t=" + Date.now();

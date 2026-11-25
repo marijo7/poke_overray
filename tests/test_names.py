@@ -1,6 +1,6 @@
 import unittest
 
-from overlay.names import NameMatcher, normalize, showdown_to_ja
+from overlay.names import NameMatcher, normalize, resolve, showdown_to_ja
 
 
 class TestNames(unittest.TestCase):
@@ -31,6 +31,9 @@ class TestNames(unittest.TestCase):
 
     def test_mega(self):
         self.assertEqual(self.m.match("メガリザードン")[0], "リザードン")
+        self.assertEqual(self.m.match("メガリザードンY")[0], "リザードン")
+        self.assertEqual(self.m.match("メガニウム")[0], "メガニウム")
+        self.assertEqual(self.m.match("メガヤンマ")[0], "メガヤンマ")
 
     def test_reject_garbage(self):
         self.assertIsNone(self.m.match("HP 152/152")[0])
@@ -41,6 +44,14 @@ class TestNames(unittest.TestCase):
         self.assertEqual(showdown_to_ja("Ninetales-Alola"), ("キュウコン(アローラ)", "キュウコン"))
         self.assertEqual(showdown_to_ja("Kommo-o"), ("ジャラランガ", "ジャラランガ"))
         self.assertEqual(showdown_to_ja("Mr. Rime")[1], "バリコオル")
+
+    def test_resolve_sprite(self):
+        self.assertEqual(resolve("Charizard-Mega-Y")["sprite"], 10035)
+        self.assertEqual(resolve("Indeedee-F")["sprite"], 10186)
+        self.assertEqual(resolve("Basculegion")["sprite"], 902)
+        self.assertEqual(resolve("メガガブリアスZ")["sprite"], 10309)
+        self.assertEqual(resolve("キュウコン(アローラ)")["key"], "Ninetales-Alola")
+        self.assertEqual(resolve("ミミッキュ")["sprite"], 778)
 
     def test_normalize(self):
         self.assertEqual(normalize("ｶﾞﾌﾞﾘｱｽ"), "ガブリアス")

@@ -2,14 +2,47 @@
 import json
 import logging
 import mimetypes
+import re
+import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .config import save_config
+from .names import all_names_ja
 
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+ROOT = Path(__file__).resolve().parent.parent
+WEB_DIR = ROOT / "web"
+SPRITE_DIR = ROOT / "data" / "sprites"
+# ポケモン HOME の画像 (PokeAPI がホストしているもの)。初回だけ取得して data/sprites に保存する
+SPRITE_URLS = [
+    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/{id}.png",
+    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{id}.png",
+]
 log = logging.getLogger(__name__)
+_sprite_lock = threading.Lock()
+
+
+def get_sprite(pid: int):
+    path = SPRITE_DIR / f"{pid}.png"
+    if path.exists():
+        return path.read_bytes()
+    with _sprite_lock:
+        if path.exists():
+            return path.read_bytes()
+        for url in SPRITE_URLS:
+            try:
+                req = urllib.request.Request(url.format(id=pid), headers={"User-Agent": "poke-overlay/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    data = r.read()
+            except Exception as e:
+                log.debug("画像取得失敗 %s: %s", url.format(id=pid), e)
+                continue
+            SPRITE_DIR.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            return data
+    return None
 
 
 class App:
@@ -41,8 +74,8 @@ def make_handler(app: App):
             path = urlparse(self.path).path
             if path in ("/", "/overlay"):
                 path = "/overlay.html"
-            elif path == "/control":
-                path = "/control.html"
+            elif path in ("/control", "/party"):
+                path += ".html"
 
             if path == "/api/state":
                 return self._json(app.state.snapshot(app.cfg["regions"]))
@@ -56,6 +89,25 @@ def make_handler(app: App):
             if path == "/api/pokemon":
                 return self._json([{"key": e["key"], "display": e["display"], "rank": e.get("rank")}
                                    for e in app.usage.list()])
+            if path == "/api/names":  # 手動入力の候補 (採用率データがあるもの → 全ポケモン)
+                seen, out = set(), []
+                for n in [e["display"] for e in app.usage.list()] + all_names_ja():
+                    if n not in seen:
+                        seen.add(n)
+                        out.append(n)
+                return self._json(out)
+            m = re.fullmatch(r"/sprite/(\d+)\.png", path)
+            if m:
+                data = get_sprite(int(m.group(1)))
+                if data is None:
+                    return self._send(404, b"no sprite", "text/plain")
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Cache-Control", "max-age=86400")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
 
             f = (WEB_DIR / path.lstrip("/")).resolve()
             if WEB_DIR not in f.parents or not f.is_file():
@@ -79,12 +131,26 @@ def make_handler(app: App):
                 clean = []
                 for r in regions:
                     clean.append({"id": str(r["id"]), "label": str(r.get("label", r["id"])),
+                                  "side": "me" if r.get("side") == "me" else "opp",
                                   **{k: min(1.0, max(0.0, float(r[k]))) for k in ("x", "y", "w", "h")}})
                 app.cfg["regions"] = clean
                 save_config(app.cfg)
                 return self._json({"ok": True, "regions": clean})
             if path == "/api/slot":
-                app.state.set_slot(body["id"], key=body.get("key"), species=body.get("species"), source="manual")
+                region = next((r for r in app.cfg["regions"] if r["id"] == body.get("id")), {})
+                app.state.set_slot(body.get("id"), ident=body.get("ident"), side=region.get("side", "opp"),
+                                   source="manual")
+                return self._json({"ok": True})
+            if path == "/api/party":
+                side = body.get("side")
+                members = body.get("members")
+                if side not in ("me", "opp") or not isinstance(members, list):
+                    return self._json({"error": "side と members が必要"}, 400)
+                members = [str(m).strip() for m in members if str(m).strip()]
+                app.state.set_party(side, members)
+                if side == "me":
+                    app.cfg["my_party"] = app.state.parties["me"]
+                    save_config(app.cfg)
                 return self._json({"ok": True})
             if path == "/api/reset":
                 app.state.reset()

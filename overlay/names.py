@@ -20,7 +20,7 @@ _NOISE = re.compile(r"[\s　・･.,、。:：;；!！?？'\"“”‘’()（�
 _FORM_JA = {
     "Alola": "アローラ", "Galar": "ガラル", "Hisui": "ヒスイ", "Paldea": "パルデア",
     "Wash": "ウォッシュ", "Heat": "ヒート", "Frost": "フロスト", "Fan": "スピン", "Mow": "カット",
-    "F": "♀", "M": "♂", "Therian": "れいじゅう", "Eternal": "えいえんのはな", "Bloodmoon": "アカツキ",
+    "F": "♀", "M": "♂", "Female": "♀", "Male": "♂", "Therian": "れいじゅう", "Eternal": "えいえんのはな", "Bloodmoon": "アカツキ",
     "Hearthflame": "かまどのめん", "Wellspring": "いどのめん", "Cornerstone": "いしずえのめん",
 }
 
@@ -99,12 +99,16 @@ class NameMatcher:
     def match(self, text: str):
         """戻り値: (日本語名, スコア 0-1) または (None, 0)。"""
         t = normalize(text)
-        if t.startswith("メガ") and len(t) > 3:
-            t = t[2:]
         if len(t) < 2:
             return None, 0.0
-        if t in self.by_norm:
+        if t in self.by_norm:  # メガニウム・メガヤンマ はそのまま一致する
             return self.by_norm[t], 1.0
+        if t.startswith("メガ") and len(t) > 3:  # メガリザードンY → リザードン
+            t = t[2:]
+            if t in self.by_norm:
+                return self.by_norm[t], 1.0
+            if t[:-1] in self.by_norm and t[-1] in "XYZ":
+                return self.by_norm[t[:-1]], 1.0
         # 「あいての ガブリアス」等、余計な文字を含むケース
         for n in self.sorted_norms:
             if len(n) >= 3 and n in t:
@@ -119,3 +123,90 @@ class NameMatcher:
         if best is not None and best_score >= self.min_ratio:
             return self.by_norm[best], best_score
         return None, best_score
+
+
+# ---- 画像 ID (PokeAPI のポケモン ID) ----
+
+_SUFFIX_ALIAS = {"f": "female", "m": "male"}
+
+
+def _identifier(showdown: str) -> str:
+    t = unicodedata.normalize("NFKD", showdown).encode("ascii", "ignore").decode().lower()
+    t = re.sub(r"[.'’:]", "", t).replace(" ", "-")
+    parts = t.split("-")
+    if len(parts) > 1 and parts[-1] in _SUFFIX_ALIAS:
+        parts[-1] = _SUFFIX_ALIAS[parts[-1]]
+    return "-".join(parts)
+
+
+def sprite_id_for_showdown(name: str):
+    """Showdown 形式の名前 → 画像 ID。フォルム画像が無ければ通常フォルム。"""
+    names = load_names()
+    fid = names["forms"].get(_identifier(name))
+    if fid:
+        return fid
+    base, _ = split_showdown_name(name)
+    return names["species_id"].get(base)
+
+
+@lru_cache(maxsize=1)
+def _ja_to_en() -> dict:
+    out = {}
+    for en, ja in load_names()["pokemon"].items():
+        out.setdefault(normalize(ja), en)
+    return out
+
+
+def sprite_id_for_ja(species_ja: str):
+    """日本語の種族名 → 画像 ID (通常フォルム)。"""
+    en = _ja_to_en().get(normalize(species_ja))
+    return load_names()["species_id"].get(en) if en else None
+
+
+def resolve(ident: str, usage_db=None):
+    """パーティ等に登録された識別子 (採用率データのキー / 日本語名) → 表示用情報。"""
+    if not ident:
+        return None
+    entry = None
+    if usage_db is not None:
+        entry = usage_db.get(ident) or next(
+            (e for e in usage_db.entries.values() if e["display"] == ident), None)
+    if entry:
+        return {"key": entry["key"], "display": entry["display"], "species": entry["species"],
+                "sprite": sprite_id_for_showdown(entry["key"]), "has_data": True}
+    if re.fullmatch(r"[A-Za-z0-9 .'’:-]+", ident):  # 英語 (Showdown) 名
+        display, species = showdown_to_ja(ident)
+        return {"key": ident, "display": display, "species": species,
+                "sprite": sprite_id_for_showdown(ident), "has_data": False}
+    sd = ja_form_index().get(normalize(ident))
+    if sd:  # メガリザードンY などフォルム付きの日本語名
+        display, species = showdown_to_ja(sd)
+        return {"key": sd, "display": display, "species": species,
+                "sprite": sprite_id_for_showdown(sd), "has_data": False}
+    return {"key": ident, "display": ident, "species": ident, "sprite": sprite_id_for_ja(ident),
+            "has_data": False}
+
+
+_LISTED_FORMS = ("Mega", "Alola", "Galar", "Hisui", "Paldea", "Female", "Wash", "Heat", "Frost", "Fan", "Mow",
+                 "Therian", "Eternal", "Bloodmoon")
+
+
+@lru_cache(maxsize=1)
+def ja_form_index():
+    """日本語のフォルム名 (正規化済み) → Showdown 形式の名前。メガシンカ・リージョンフォーム等。"""
+    out = {}
+    for ident in load_names()["forms"]:
+        sd = "-".join(w.capitalize() for w in ident.split("-"))
+        _, form = split_showdown_name(sd)
+        if form and form[0] in _LISTED_FORMS:
+            out.setdefault(normalize(showdown_to_ja(sd)[0]), sd)
+    return out
+
+
+@lru_cache(maxsize=1)
+def all_names_ja():
+    """手動入力の候補: 全種族 (図鑑順) + メガシンカ・リージョンフォーム等。"""
+    names = load_names()
+    species = [ja for en, ja in sorted(names["pokemon"].items(), key=lambda kv: names["species_id"].get(kv[0], 9999))]
+    forms = sorted(showdown_to_ja(sd)[0] for sd in ja_form_index().values())
+    return species + forms
