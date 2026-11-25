@@ -19,3 +19,5 @@ web/fonts/*
 data/nicknames.json
 # 選出画面のタイプアイコン (各自の環境で学習)
 data/types/
+# 選出画面の照合用に取得する Champions のポケモン画像
+data/champions_icons/

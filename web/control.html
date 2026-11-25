@@ -480,7 +480,7 @@
     $("oppparty").innerHTML = members.length ? members.map((m, i) => {
       if (m.icon) {  // 未登録アイコン: タイプから絞り込んだ候補をボタンで出す
         const g = guesses[m.icon];
-        const cands = g && g.cands.length ? `<div class="cands">${esc(g.types.join("/"))}: ${g.cands.map((c) =>
+        const cands = g && g.cands.length ? `<div class="cands">${esc(g.types.length ? g.types.join("/") : "見た目が近い")}: ${g.cands.map((c) =>
           `<button data-label-uid="${esc(m.icon)}" data-label-name="${esc(c.key)}">${esc(c.display)}</button>`).join("")}</div>` : "";
         return `<span class="chip unknown"><img src="/api/icon/${esc(m.icon)}.png" alt="">
           <input list="pokelist" placeholder="名前を入れて登録" data-label="${esc(m.icon)}"><button data-rm="${i}" title="削除">×</button>${cands}</span>`;

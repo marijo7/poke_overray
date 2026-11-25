@@ -125,6 +125,41 @@ def cbd_entry(fmt, rank, item):
     }, data.get("season")
 
 
+ICON_DIR = ROOT / "data" / "champions_icons"
+
+
+def fetch_champion_icons(roster, delay=0.1):
+    """選出画面のアイコン照合に使う、Champions のポケモン画像を取得する (初回のみ。以後は増えた分だけ)。
+
+    画像のファイル名は API の一覧 (/api, 約 18MB) にあるので、まだ知らないポケモンがいるときだけ一覧を取り直す。"""
+    ICON_DIR.mkdir(parents=True, exist_ok=True)
+    map_path = ICON_DIR / "map.json"
+    m = json.loads(map_path.read_text(encoding="utf-8")) if map_path.exists() else {}
+    if any(r not in m for r in roster):
+        print("ポケモン画像の一覧を取得中 (初回のみ・約 18MB)...")
+        index = get_json(CBD_API)
+        for e in index.get("pokemon", []):
+            summ = e.get("summary") or {}
+            if summ.get("sprite"):
+                m[e.get("battleName") or e["name"]] = summ["sprite"]
+            for f in summ.get("forms", []):
+                if f.get("showdown_name") and f.get("image_path"):
+                    m.setdefault(f["showdown_name"], f["image_path"])
+        map_path.write_text(json.dumps(m, ensure_ascii=False, indent=0), encoding="utf-8")
+    todo = [r for r in roster if r in m and not (ICON_DIR / f"{r}.png").exists()]
+    if todo:
+        print(f"ポケモン画像を取得中: {len(todo)} 枚")
+    for r in todo:
+        try:
+            req = urllib.request.Request("https://championsbattledata.com/" + urllib.parse.quote(m[r]),
+                                         headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                (ICON_DIR / f"{r}.png").write_bytes(resp.read())
+        except Exception as e:
+            print(f"  {r}: 画像の取得失敗 {e}")
+        time.sleep(delay)
+
+
 def fetch_cbd(fmt, limit, delay):
     fmt = {"doubles": "Doubles", "singles": "Singles"}.get(fmt.lower(), "Doubles")
     rk = get_json(f"{CBD_API}/rankings?format={fmt}")  # 全ポケモンの順位 (候補の絞り込みに使う)
@@ -219,6 +254,10 @@ def main():
     print(f"データ元: {SOURCE_NAMES[source]} / {fmt}")
     if source == "championsbattledata":
         result, meta = fetch_cbd(fmt, args.limit or 100, args.delay)
+        try:
+            fetch_champion_icons(meta.get("roster", []))
+        except Exception as e:  # 画像が取れなくても採用率データは保存する
+            print(f"ポケモン画像を取得できませんでした: {e}")
     else:
         result, meta = fetch_pikalytics(fmt, args.limit or 50, args.delay)
     if not result:

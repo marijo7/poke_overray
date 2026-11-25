@@ -9,6 +9,7 @@ import time
 
 from .capture import create_capture
 from .config import save_config
+from .champ_icons import ChampionIcons
 from .icons import ICON_DIR, IconDB, crop_with_margin
 from .gender import crop as crop_rect
 from .gender import detect_gender
@@ -235,6 +236,7 @@ class Recognizer(threading.Thread):
         # 体力バー横の顔画像 (メガシンカ判定用)。種族ごとに「通常」と「メガシンカ後」の見た目を覚える
         self.portraits = IconDB(ICON_DIR.parent / "portraits")
         self.portrait_pending = {}  # region id -> (候補フォルム, 連続回数)
+        self.champ = ChampionIcons()  # Champions のポケモン画像 (選出画面のアイコンの推定用)
         self.pending_nick = {}      # region id -> 未登録ニックネームを続けて読んだ回数
 
     def _setup(self):
@@ -398,26 +400,55 @@ class Recognizer(threading.Thread):
         return types
 
     def guess_by_types(self, frame, pv, i, n, uid):
-        """未登録アイコンを、横のタイプアイコンから推定する。候補が 1 匹ならそのポケモン、複数なら候補を出す。"""
+        """未登録アイコンを推定する。
+
+        1. 横のタイプアイコンが読めれば、Champions で使えるポケモンを同じタイプに絞る
+        2. Champions のポケモン画像があれば、アイコンの絵と比べて候補を順位付けする
+           (タイプが読めないときは全ポケモンと色で比べ、はっきり一致したときだけ採用)
+        候補がはっきり 1 匹に決まればそのポケモン (推定)、決まらなければ候補だけを出す。
+        """
+        usage = self.state.usage
         types = self.read_types(uid)
-        if not types:
-            return None
-        taken = {resolve(m, self.state.usage)["species"] for m in self.preview_opp if m and not m.startswith("icon:")}
-        cands = []
-        for key in self.state.usage.roster():
-            if types_of(key, self.state.usage) == types:
-                sp = resolve(key, self.state.usage)["species"]
-                if sp not in taken and sp not in {resolve(c, self.state.usage)["species"] for c in cands}:
-                    cands.append(key)
+        taken = {resolve(m, usage)["species"] for m in self.preview_opp if m and not m.startswith("icon:")}
+        roster, seen = [], set(taken)
+        for key in usage.roster():  # 同じ種族はパーティに 1 匹だけ (性別違い等は先頭の 1 つ)
+            sp = resolve(key, usage)["species"]
+            if sp not in seen:
+                seen.add(sp)
+                roster.append(key)
+        order = {k: j for j, k in enumerate(roster)}
+        outer = None
+        if frame is not None and pv.get("opp_first"):
+            outer = crop_with_margin(frame, _lerp(pv["opp_first"], pv["opp_last"], i, n))[0]
+        guess, cands, by = None, [], None
+        if types:
+            cands, by = [k for k in roster if types_of(k, usage) == types], "type"
+            if len(cands) == 1:
+                guess = cands[0]
+            elif cands and outer is not None and self.champ.available(cands):
+                # 色+輪郭の一致度に、使用率の高さを少しだけ足す (僅差なら使われているポケモンの方が出やすい)
+                scored = sorted((((c + e) / 2 + 0.05 * (1 - order[k] / len(roster)), k)
+                                 for k, c, e in self.champ.rank(outer, cands)), reverse=True)
+                cands = [k for _, k in scored] + [k for k in cands if k not in {k2 for _, k2 in scored}]
+                if len(scored) >= 2 and scored[0][0] - scored[1][0] >= 0.05:
+                    guess, by = scored[0][1], "type+image"
+        elif outer is not None and self.champ.available():
+            ranked = self.champ.rank(outer, roster, use_edges=False)  # タイプ未学習: 全ポケモンと色で比べる
+            cands, by = [k for k, _, _ in ranked[:5]], "image"
+            # 実測: 正解は 2 位に 0.12 以上の差、外れは 0.01〜0.03 の僅差だったので、はっきりした差のときだけ採用
+            if ranked and ranked[0][1] >= 0.75 and (len(ranked) < 2 or ranked[0][1] - ranked[1][1] >= 0.12):
+                guess = ranked[0][0]
+        if not types and not cands:
+            return None  # まだ手掛かりが無い (次のフレームでもう一度)
         g = (detect_gender(crop_rect(frame, _lerp(pv["opp_gender_first"], pv["opp_gender_last"], i, n)))
-             if pv.get("opp_gender_first") else None)
-        guess = None
-        if len(cands) == 1:
-            sp = resolve(cands[0], self.state.usage)["species"]
-            guess = gender_variant(sp, g, self.state.usage) or cands[0]
-        self.state.icon_guess[uid] = {"types": types, "cands": cands, "guess": guess}
-        log.info("相手%d: タイプ %s → 候補 %s", i + 1, "/".join(type_name_ja(t) for t in types),
-                 "、".join(resolve(c, self.state.usage)["display"] for c in cands[:5]) or "なし")
+             if frame is not None and pv.get("opp_gender_first") else None)
+        if guess:
+            guess = gender_variant(resolve(guess, usage)["species"], g, usage) or guess
+        self.state.icon_guess[uid] = {"types": types or [], "cands": cands, "guess": guess, "by": by}
+        log.info("相手%d: %s → 候補 %s%s", i + 1,
+                 "タイプ " + "/".join(type_name_ja(t) for t in types) if types else "見た目",
+                 "、".join(resolve(c, usage)["display"] for c in cands[:5]) or "なし",
+                 f" → 推定 {resolve(guess, usage)['display']}" if guess else "")
         return guess
 
     def process_battle(self, frame, cfg, scale):
