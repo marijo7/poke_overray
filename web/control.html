@@ -58,6 +58,8 @@
   .fontpreview { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: rgba(16, 18, 28, 0.9); color: #f4f6fb; }
   .fontpreview .fp-name { font-size: 22px; font-weight: 800; border-bottom: 2px solid #ffcc33; margin-bottom: 6px; }
   .fontpreview .fp-row { display: flex; justify-content: space-between; font-size: 15px; line-height: 22px; padding: 0 6px; margin: 2px 0; border-radius: 4px; background: rgba(79, 140, 255, 0.45); }
+  .pvdebug { font-size: 12px; color: var(--sub); background: var(--bg); border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; line-height: 1.6; }
+  .pvdebug b.ok { color: #2f9e44; } .pvdebug b.ng { color: var(--warn); }
   .rect.pv { border-color: #b197fc; background: rgba(177, 151, 252, 0.12); }
   .rect.pv span { background: #b197fc; }
   .rect.ghost { border-style: dashed; opacity: 0.7; }
@@ -85,6 +87,7 @@
       <h2>領域一覧 (対戦中の名前)</h2>
       <table id="regions"></table>
       <h2 style="margin-top:14px">選出画面 <label class="hint" style="font-weight:400"><input type="checkbox" id="pvon"> 読み取る</label></h2>
+      <div id="pvdebug" class="pvdebug"></div>
       <table id="pvregions"></table>
       <p class="hint">選出画面を表示した状態で、各項目を選んでドラッグ。1 匹目と 6 匹目を合わせれば間は自動で等間隔に並びます。マーカーは「4匹 選出してください」の行に合わせてください。</p>
       <div class="row" style="margin-top:8px">
@@ -427,6 +430,20 @@
     setTimeout(() => ($("fontsaved").textContent = ""), 3000);
   };
 
+  // ---- 選出画面の読み取り結果 (うまくいかないときの確認用) ----
+  function renderPvDebug(d, status) {
+    const m = d.preview;
+    if (!m) { $("pvdebug").innerHTML = "読み取り結果: まだ画面を読んでいません"; return; }
+    const lines = [`${status.layout_switched ? `<b class="ok">画面に合わせて読み取り範囲を「${esc(status.layout_switched)}」に自動で切り替えました</b><br>` : ""}選出画面の判定: ${m.found ? '<b class="ok">選出画面</b>' : '<b class="ng">選出画面ではない</b>'}
+      (マーカーの文字: 「${esc(m.text || "読めず")}」${m.found ? "" : " ← ここに「選出」が含まれると選出画面と判定"})`];
+    const my = [...Array(6).keys()].map((i) => d["my" + i]).filter(Boolean);
+    if (my.length) lines.push("自分の名前: " + my.map((x, i) => `${i + 1}.「${esc(x.text || "読めず")}」${x.match ? "→" + esc(x.match) : ""}`).join(" / "));
+    const ic = [...Array(6).keys()].map((i) => d["icon" + i]).filter(Boolean);
+    if (ic.length) lines.push("相手アイコン: " + ic.map((x, i) => `${i + 1}. ${x.match && x.score >= 0.8 ? "登録済み " + esc(x.match)
+      : x.guess ? "推定 " + esc(x.guess) : x.cands ? `候補 ${x.cands} 匹` : "未登録"}`).join(" / "));
+    $("pvdebug").innerHTML = lines.join("<br>");
+  }
+
   // ---- ニックネーム ----
   let lastUnknown = "";
   function renderUnknownNicks(list) {
@@ -542,6 +559,7 @@
       if (sig !== lastSig && !$("slots").contains(document.activeElement)) { lastSig = sig; renderSlots(st); renderNatQuick(st.slots); }
       if (!myLoaded) { renderMyParty(st.parties.me); myLoaded = true; }
       renderUnknownNicks(st.unknown_nicks || []);
+      renderPvDebug(st.preview_debug || {}, st.status);
       const oppSig = JSON.stringify(st.parties.opp);
       const oppSig2 = oppSig + JSON.stringify(st.icon_guesses || {});
       if (oppSig2 !== lastOpp && !$("oppparty").contains(document.activeElement)) { lastOpp = oppSig2; renderOppParty(st.parties.opp, st.icon_guesses); loadIcons(); }

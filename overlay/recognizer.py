@@ -216,7 +216,9 @@ class State:
                              "guess": g.get("guess")}
                        for uid, g in self.icon_guess.items()}
             unknown = [dict(v) for v in self.unknown_nicks.values()]
+            dbg = {k: v for k, v in self.debug.items() if k == "preview" or k.startswith(("my", "icon"))}
             return {"version": self.version, "slots": slots, "parties": parties, "unknown_nicks": unknown,
+                    "preview_debug": dbg,
                     "icon_guesses": guesses,
                     "history": parties["opp"],  # 旧形式との互換
                     "status": dict(self.status), "perf": dict(self.perf), "usage_meta": self.usage.meta}
@@ -238,6 +240,7 @@ class Recognizer(threading.Thread):
         self.portrait_pending = {}  # region id -> (候補フォルム, 連続回数)
         self.champ = ChampionIcons()  # Champions のポケモン画像 (選出画面のアイコンの推定用)
         self.pending_nick = {}      # region id -> 未登録ニックネームを続けて読んだ回数
+        self.layout_votes = {}      # 他の画面レイアウトで選出画面が読めた回数
 
     def _setup(self):
         cfg = self.get_config()
@@ -299,11 +302,39 @@ class Recognizer(threading.Thread):
         pv = cfg.get("preview") or {}
         if pv.get("enabled"):
             text = "".join(self._ocr_rect(frame, pv["marker"], scale))
-            self.state.debug["preview"] = {"text": text}
-            if any(k in normalize(text) or k in text for k in pv.get("keywords", ["選出"])):
+            keys = pv.get("keywords", ["選出"])
+            found = any(k in normalize(text) or k in text for k in keys)
+            if not found:
+                found = self.try_other_layouts(frame, cfg, keys, scale)  # スマホ版/Switch 版の設定違いなら自動で切り替え
+                pv = cfg.get("preview") or {}
+            self.state.debug["preview"] = {"text": text, "found": found, "time": time.time(),
+                                           "layout": cfg.get("layout")}
+            if found:
                 self.process_preview(frame, cfg, pv, scale)
                 return
         self.process_battle(frame, cfg, scale)
+
+    def try_other_layouts(self, frame, cfg, keys, scale):
+        """今の設定 (例: スマホ版) では選出画面の文字が読めないとき、他の画面 (Switch 版) の位置でも読んでみる。
+        2 回続けてそちらで読めたら、読み取り範囲をその画面用に切り替える。"""
+        from .config import PRESETS, apply_preset
+        for name, preset in PRESETS.items():
+            if name == cfg.get("layout"):
+                continue
+            text = "".join(self._ocr_rect(frame, preset["preview"]["marker"], scale))
+            if any(k in normalize(text) or k in text for k in keys):
+                n = self.layout_votes.get(name, 0) + 1
+                self.layout_votes = {name: n}
+                if n >= 2:
+                    log.info("画面が %s のようなので、読み取り範囲を %s 用に切り替えました", preset["label"], preset["label"])
+                    apply_preset(cfg, name)
+                    save_config(cfg)
+                    self.state.status["layout_switched"] = preset["label"]
+                    self.layout_votes = {}
+                    return True
+                return False
+        self.layout_votes = {}
+        return False
 
     def process_preview(self, frame, cfg, pv, scale):
         n = int(pv.get("count", 6))
@@ -343,6 +374,10 @@ class Recognizer(threading.Thread):
                 pass  # 推定済み (毎フレーム推定し直さない)
             else:
                 self.preview_opp[i] = self.guess_by_types(frame, pv, i, n, uid) or "icon:" + uid
+            g = self.state.icon_guess.get(uid)
+            if g:  # 設定画面の「選出画面の読み取り結果」用
+                self.state.debug[f"icon{i}"]["guess"] = resolve(g["guess"], self.state.usage)["display"] if g.get("guess") else None
+                self.state.debug[f"icon{i}"]["cands"] = len(g.get("cands") or [])
         opp = [m for m in self.preview_opp if m]
         if opp != self.state.parties["opp"]:
             # 手動で名前を付けた分 (icon: → キー) は残す
@@ -359,6 +394,7 @@ class Recognizer(threading.Thread):
                 texts = self._ocr_rect(frame, _lerp(pv["my_first"], pv["my_last"], i, n), scale)
                 text = " ".join(texts)
                 sp, _ = self.matcher.match(text) if texts else (None, 0)
+                self.state.debug[f"my{i}"] = {"text": text, "match": sp}  # 設定画面の「選出画面の読み取り結果」用
                 g = (detect_gender(crop_rect(frame, _lerp(pv["my_gender_first"], pv["my_gender_last"], i, n)))
                      if pv.get("my_gender_first") else None)
                 if not sp and texts:
