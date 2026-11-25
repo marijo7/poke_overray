@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from .config import save_config
+from .config import PRESETS, apply_preset, save_config
 from .names import all_names_ja
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -101,7 +101,12 @@ def make_handler(app: App):
                 return self._send(200, jpeg, "image/jpeg")
             if path == "/api/config":
                 return self._json({"regions": app.cfg["regions"], "usage": app.cfg["usage"],
-                                   "preview": app.cfg.get("preview")})
+                                   "preview": app.cfg.get("preview"), "layout": app.cfg.get("layout"),
+                                   "presets": {k: v["label"] for k, v in PRESETS.items()}})
+            if path == "/api/nicknames":
+                from .names import resolve
+                return self._json([dict(n, display=(resolve(n["ident"], app.usage) or {}).get("display", n["ident"]))
+                                   for n in app.state.nicknames.list()])
             if path == "/api/pokemon":
                 return self._json([{"key": e["key"], "display": e["display"], "rank": e.get("rank")}
                                    for e in app.usage.list()])
@@ -193,6 +198,12 @@ def make_handler(app: App):
                 region = next((r for r in app.cfg["regions"] if r["id"] == body.get("id")), {})
                 app.state.set_slot(body.get("id"), ident=body.get("ident"), side=region.get("side", "opp"),
                                    source="manual")
+                # 読めた文字がポケモン名でなかった (= ニックネーム) なら、そのニックネームとして覚える
+                dbg = app.state.debug.get(body.get("id")) or {}
+                if body.get("ident") and dbg.get("text") and dbg.get("via") in ("unknown", "portrait", "nickname"):
+                    from .nicknames import looks_like_name
+                    if looks_like_name(dbg["text"]):
+                        app.state.label_nickname(dbg["text"], app.state.slots[body["id"]]["ident"])
                 if body.get("ident") and app.recognizer is not None:
                     app.recognizer.learn_portrait(body.get("id"), app.state.slots[body["id"]]["ident"])
                 return self._json({"ok": True})
@@ -227,6 +238,18 @@ def make_handler(app: App):
                 saved = app.usage.set_natures(key, body.get("natures") or [])
                 app.state.version += 1
                 return self._json({"ok": True, "natures": saved})
+            if path == "/api/nickname":
+                key = app.state.label_nickname(str(body.get("nick", "")), str(body.get("name", "")).strip())
+                return self._json({"ok": bool(key), "key": key})
+            if path == "/api/nickname_delete":
+                return self._json({"ok": app.state.nicknames.remove(str(body.get("nick", "")))})
+            if path == "/api/preset":
+                name = body.get("name")
+                if name not in PRESETS:
+                    return self._json({"error": "unknown preset"}, 400)
+                apply_preset(app.cfg, name)
+                save_config(app.cfg)
+                return self._json({"ok": True, "regions": app.cfg["regions"], "preview": app.cfg["preview"]})
             if path == "/api/icon_label":
                 key = app.state.label_icon(str(body.get("uid", "")), str(body.get("name", "")).strip())
                 return self._json({"ok": bool(key), "key": key})

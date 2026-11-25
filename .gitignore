@@ -15,3 +15,5 @@ data/portraits/
 data/natures.json
 web/fonts/*
 !web/fonts/README.txt
+# 登録したニックネーム
+data/nicknames.json

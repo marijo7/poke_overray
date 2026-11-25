@@ -196,6 +196,9 @@ def resolve(ident: str, usage_db=None):
     """パーティ等に登録された識別子 (採用率データのキー / 日本語名) → 表示用情報。"""
     if not ident:
         return None
+    if ident.startswith("nick:"):  # 未登録のニックネーム (何のポケモンか分からない)
+        return {"key": ident, "display": ident[5:], "species": None, "sprite": None, "nick": ident[5:],
+                "has_data": False}
     if ident.startswith("icon:"):  # 選出画面で見たが未登録のアイコン
         return {"key": ident, "display": "?", "species": None, "sprite": None, "icon": ident[5:],
                 "has_data": False}
@@ -220,8 +223,8 @@ def resolve(ident: str, usage_db=None):
         entry = next((e for e in usage_db.entries.values() if normalize(e["display"]) == n), None)
         if entry:
             return resolve(entry["key"], usage_db)
-    sd = ja_form_index().get(normalize(ident))
-    if sd:  # メガリザードンY などフォルム付きの日本語名
+    sd = ja_form_exact().get(ident.strip()) or ja_form_index().get(normalize(ident))
+    if sd:  # メガリザードンY・ニャオニクス(♀) などフォルム付きの日本語名
         display, species = showdown_to_ja(sd)
         return {"key": sd, "display": display, "species": species,
                 "sprite": sprite_id_for_showdown(sd), "has_data": False}
@@ -234,6 +237,18 @@ _LISTED_FORMS = ("Mega", "Alola", "Galar", "Hisui", "Paldea", "Female", "Wash", 
 
 
 @lru_cache(maxsize=1)
+def ja_form_exact():
+    """表示名そのまま (例: ニャオニクス(♀)) → Showdown 形式の名前"""
+    out = {}
+    for ident in load_names()["forms"]:
+        sd = "-".join(w.capitalize() for w in ident.split("-"))
+        _, form = split_showdown_name(sd)
+        if form and form[0] in _LISTED_FORMS:
+            out.setdefault(showdown_to_ja(sd)[0], sd)
+    return out
+
+
+@lru_cache(maxsize=1)
 def ja_form_index():
     """日本語のフォルム名 (正規化済み) → Showdown 形式の名前。メガシンカ・リージョンフォーム等。"""
     out = {}
@@ -241,7 +256,10 @@ def ja_form_index():
         sd = "-".join(w.capitalize() for w in ident.split("-"))
         _, form = split_showdown_name(sd)
         if form and form[0] in _LISTED_FORMS:
-            out.setdefault(normalize(showdown_to_ja(sd)[0]), sd)
+            display, species = showdown_to_ja(sd)
+            if normalize(display) == normalize(species):
+                continue  # 「ニャオニクス(♀)」は比較用に正規化すると「ニャオニクス」と同じになるので、種族名の入力を奪わない
+            out.setdefault(normalize(display), sd)
     return out
 
 

@@ -71,6 +71,10 @@
   <section>
     <div class="panel">
       <h2>読み取り範囲</h2>
+      <div class="row" style="margin-bottom:8px">
+        <span>ゲーム:</span><select id="preset"></select><button id="presetapply">この画面用の範囲にする</button>
+        <span id="presetmsg" class="hint"></span>
+      </div>
       <div id="stage"><img id="frame" alt=""><div class="noframe" id="noframe">画面を取得できていません</div></div>
       <p class="hint">下の一覧で領域を選び、画像上をドラッグすると範囲を設定できます。「名前」は<b>名前の文字だけ</b>が入るように、「顔」は名前の左の小さなポケモンの絵（メガシンカの判定に使用）、「性別」は名前の右の ♀/♂ マーク（イエッサン等の性別違いの判定に使用）を囲みます。調整したら「保存」を押してください。</p>
     </div>
@@ -112,6 +116,13 @@
       <div class="chips" id="oppparty"></div>
       <div class="ctl row" style="margin-top:8px"><input list="pokelist" id="oppadd" placeholder="追加 (名前を入力して Enter)" style="flex:1;min-width:0"></div>
       <p class="hint">選出画面のアイコンから自動で入ります。<b>?</b> のアイコンは未登録なので、名前を入れて登録すると次回から自動で認識します。対戦中に名前を読み取った相手も追加されます。</p>
+    </div>
+    <div class="panel">
+      <h2>ニックネーム</h2>
+      <div id="nickunknown"></div>
+      <div class="chips" id="nicklist" style="margin-top:6px"></div>
+      <p class="hint">ポケモン名の代わりにニックネームが表示される場合、何のポケモンか一度入力すれば、以後は自動で認識します。
+        相手のニックネームは、そのポケモンを以前に名前で認識していれば、名前の横の顔画像で自動判定します。</p>
     </div>
     <div class="panel">
       <h2>登録済みアイコン <span class="hint" id="iconcount"></span></h2>
@@ -292,7 +303,8 @@
       return `<div class="slot" data-id="${esc(s.id)}">
         <div><span class="hint">${esc(s.label)}</span></div>
         <div class="now">${esc(name)}${src}</div>
-        <div class="ocr">OCR: ${esc(d.text || "(なし)")} ${d.match ? `→ ${esc(d.match)} (${d.score})` : ""}
+        <div class="ocr">OCR: ${esc(d.text || "(なし)")} ${d.match ? `→ ${esc(d.match)} (${d.score})${d.via === "nickname" ? " [ニックネーム]" : d.via === "portrait" ? " [顔画像で判定]" : ""}` : ""}
+          ${d.via === "unknown" ? '<br><b>未登録のニックネーム</b>: 下で何のポケモンか選ぶと覚えます' : ""}
           ${d.portrait ? `<br>顔画像: ${esc(d.portrait.match)} (${d.portrait.score})` : ""}</div>
         <div class="ctl"><input list="pokelist" placeholder="手動で選ぶ (名前を入力)" data-slot="${esc(s.id)}"><button data-clear="${esc(s.id)}">消す</button></div>
       </div>`;
@@ -412,6 +424,41 @@
     setTimeout(() => ($("fontsaved").textContent = ""), 3000);
   };
 
+  // ---- ニックネーム ----
+  let lastUnknown = "";
+  function renderUnknownNicks(list) {
+    const sig = JSON.stringify(list);
+    if (sig === lastUnknown || $("nickunknown").contains(document.activeElement)) return;
+    lastUnknown = sig;
+    $("nickunknown").innerHTML = list.map((n) => `<div class="row" style="margin:4px 0">
+        <span class="tag">${n.side === "me" ? "自分" : "相手"}</span><b>${esc(n.nick)}</b> =
+        <input list="pokelist" placeholder="何のポケモン？" data-nick="${esc(n.nick)}" style="flex:1;min-width:0"></div>`).join("");
+  }
+  $("nickunknown").addEventListener("change", async (e) => {
+    const nick = e.target.dataset.nick, name = e.target.value.trim();
+    if (!nick || !name) return;
+    const r = await post("/api/nickname", { nick, name });
+    if (!r.ok) alert("登録できませんでした (ポケモン名を確認してください)");
+    lastUnknown = ""; myLoaded = false; loadNicknames();
+  });
+  async function loadNicknames() {
+    const list = await (await fetch("/api/nicknames")).json();
+    $("nicklist").innerHTML = list.map((n) => `<span class="chip">${esc(n.nick)} = ${esc(n.display)}
+      <button data-nickdel="${esc(n.nick)}" title="削除">×</button></span>`).join("") || '<span class="hint">登録はまだありません</span>';
+  }
+  $("nicklist").addEventListener("click", async (e) => {
+    const nick = e.target.dataset.nickdel; if (!nick) return;
+    await post("/api/nickname_delete", { nick }); loadNicknames();
+  });
+
+  // ---- 画面レイアウト (スマホ版 / Switch 版) ----
+  $("presetapply").onclick = async () => {
+    if (!confirm("読み取り範囲を「" + $("preset").selectedOptions[0].textContent + "」の初期値に置き換えます。よろしいですか？")) return;
+    const r = await post("/api/preset", { name: $("preset").value });
+    if (r.ok) { regions = r.regions; preview = r.preview; dirty = false; renderRegions(); $("presetmsg").textContent = "切り替えました"; }
+    setTimeout(() => ($("presetmsg").textContent = ""), 2500);
+  };
+
   // ---- パーティ ----
   let myLoaded = false, oppParty = [];
   function renderMyParty(members) {
@@ -479,6 +526,7 @@
       const sig = JSON.stringify(st.slots);
       if (sig !== lastSig && !$("slots").contains(document.activeElement)) { lastSig = sig; renderSlots(st); renderNatQuick(st.slots); }
       if (!myLoaded) { renderMyParty(st.parties.me); myLoaded = true; }
+      renderUnknownNicks(st.unknown_nicks || []);
       const oppSig = JSON.stringify(st.parties.opp);
       if (oppSig !== lastOpp && !$("oppparty").contains(document.activeElement)) { lastOpp = oppSig; renderOppParty(st.parties.opp); loadIcons(); }
       const img = new Image();
@@ -492,7 +540,8 @@
 
   (async () => {
     const cfg = await (await fetch("/api/config")).json();
-    regions = cfg.regions; preview = cfg.preview; renderRegions(); loadIcons(); loadPokemon(); loadNatures(); loadFontSettings(); tick();
+    regions = cfg.regions; preview = cfg.preview; renderRegions(); loadNicknames();
+    $("preset").innerHTML = Object.entries(cfg.presets || {}).map(([k, v]) => `<option value="${k}" ${k === cfg.layout ? "selected" : ""}>${esc(v)}</option>`).join(""); loadIcons(); loadPokemon(); loadNatures(); loadFontSettings(); tick();
   })();
 </script>
 </body>

@@ -12,6 +12,7 @@ from .gender import crop as crop_rect
 from .gender import detect_gender
 from .names import (NameMatcher, base_stats, form_abilities_ja, gender_variant, is_mega, mega_forms, normalize,
                     resolve)
+from .nicknames import NicknameDB, clean_nick, looks_like_name, nick_key
 from .ocr import create_ocr, preprocess
 
 log = logging.getLogger(__name__)
@@ -22,8 +23,10 @@ class State:
 
     PARTY_SIZE = 6
 
-    def __init__(self, usage_db, my_party=None, icons=None):
+    def __init__(self, usage_db, my_party=None, icons=None, nicknames=None):
         self.usage = usage_db
+        self.nicknames = nicknames if nicknames is not None else NicknameDB()
+        self.unknown_nicks = {}  # nick_key -> {"nick", "side"}: 何のポケモンか分からないニックネーム
         self.icons = icons     # IconDB (選出画面のアイコン照合)
         self.icon_crops = {}   # 未登録アイコンの切り出し画像 uid -> PIL.Image
         self.lock = threading.Lock()
@@ -89,6 +92,27 @@ class State:
             self.icons.add(crop, key)
         self.parties["opp"] = [key if m == "icon:" + uid else m for m in self.parties["opp"]]
 
+    def add_unknown_nick(self, nick, side):
+        with self.lock:
+            self.unknown_nicks.setdefault(nick_key(nick), {"nick": clean_nick(nick), "side": side})
+
+    def label_nickname(self, nick, name):
+        """ニックネームに対応するポケモンを登録し、パーティ内の仮表示 (nick:) を置き換える。戻り値: 登録したキー"""
+        with self.lock:
+            info = self._resolve(name)
+            if not info or not info.get("species"):
+                return None
+            key = info["key"]
+            self.nicknames.set(nick, key)
+            k = nick_key(nick)
+            self.unknown_nicks.pop(k, None)
+            for side in ("me", "opp"):
+                self.parties[side] = [key if (m.startswith("nick:") and nick_key(m[5:]) == k) else m
+                                      for m in self.parties[side]]
+            self.base_my = [key if (m.startswith("nick:") and nick_key(m[5:]) == k) else m for m in self.base_my]
+            self.version += 1
+            return key
+
     def label_icon(self, uid, name):
         """未登録アイコンに名前を付けて登録する。戻り値: 登録したキー"""
         with self.lock:
@@ -152,7 +176,8 @@ class State:
                 active = {s["species"] for s in self.slots.values() if s["side"] == side}
                 parties[side] = [dict(self._resolve(m), active=self._resolve(m)["species"] in active)
                                  for m in members]
-            return {"version": self.version, "slots": slots, "parties": parties,
+            unknown = [dict(v) for v in self.unknown_nicks.values()]
+            return {"version": self.version, "slots": slots, "parties": parties, "unknown_nicks": unknown,
                     "history": parties["opp"],  # 旧形式との互換
                     "status": dict(self.status), "perf": dict(self.perf), "usage_meta": self.usage.meta}
 
@@ -171,6 +196,7 @@ class Recognizer(threading.Thread):
         # 体力バー横の顔画像 (メガシンカ判定用)。種族ごとに「通常」と「メガシンカ後」の見た目を覚える
         self.portraits = IconDB(ICON_DIR.parent / "portraits")
         self.portrait_pending = {}  # region id -> (候補フォルム, 連続回数)
+        self.pending_nick = {}      # region id -> 未登録ニックネームを続けて読んだ回数
 
     def _setup(self):
         cfg = self.get_config()
@@ -276,12 +302,24 @@ class Recognizer(threading.Thread):
         # 自分: 名前を OCR
         if pv.get("auto_my_party", True):
             for i in range(n):
-                if self.preview_my[i]:
-                    continue
+                if self.preview_my[i] and not self.preview_my[i].startswith("nick:"):
+                    continue  # 特定済み (未登録ニックネームは、登録されたら性別も含めて決め直す)
                 texts = self._ocr_rect(frame, _lerp(pv["my_first"], pv["my_last"], i, n), scale)
-                sp, _ = self.matcher.match(" ".join(texts)) if texts else (None, 0)
-                if sp and pv.get("my_gender_first"):
-                    g = detect_gender(crop_rect(frame, _lerp(pv["my_gender_first"], pv["my_gender_last"], i, n)))
+                text = " ".join(texts)
+                sp, _ = self.matcher.match(text) if texts else (None, 0)
+                g = (detect_gender(crop_rect(frame, _lerp(pv["my_gender_first"], pv["my_gender_last"], i, n)))
+                     if pv.get("my_gender_first") else None)
+                if not sp and texts:
+                    nick = self.state.nicknames.match(text)  # 登録済みのニックネーム
+                    if nick:
+                        nsp = resolve(nick, self.state.usage)["species"]
+                        self.preview_my[i] = gender_variant(nsp, g, self.state.usage) or nick
+                        continue
+                    if looks_like_name(text):  # 未登録のニックネーム → 仮表示して、設定画面で教えてもらう
+                        self.preview_my[i] = "nick:" + clean_nick(text)
+                        self.state.add_unknown_nick(text, "me")
+                        continue
+                if sp:
                     sp = gender_variant(sp, g, self.state.usage) or sp
                 self.preview_my[i] = sp
             mine = [m for m in self.preview_my if m]
@@ -306,10 +344,25 @@ class Recognizer(threading.Thread):
                 sp, sc = self.matcher.match(t)
                 if sp and sc > score:
                     species, score = sp, sc
-            self.state.debug[r["id"]] = {"text": text, "match": species, "score": round(score, 2)}
+            hint, via = None, "name"
+            if not species and texts and looks_like_name(text):
+                # ポケモン名ではない = ニックネーム。登録済みならそれ、無ければ顔画像で判定
+                hint, via = self.state.nicknames.match(text), "nickname"
+                if not hint:
+                    hint, via = self.identify_by_portrait(frame, r), "portrait"
+                if hint:
+                    info = resolve(hint, self.state.usage)
+                    species, score = info["species"], 0.9
+                else:
+                    self.pending_nick[r["id"]] = self.pending_nick.get(r["id"], 0) + 1
+                    if self.pending_nick[r["id"]] >= need:  # 続けて読めた名前だけ未登録として出す
+                        self.state.add_unknown_nick(text, r.get("side", "opp"))
+            self.state.debug[r["id"]] = {"text": text, "match": species, "score": round(score, 2),
+                                         "via": via if species else ("unknown" if hint is None and texts else None)}
             if not species:
                 self.pending.pop(r["id"], None)
                 continue
+            self.pending_nick.pop(r["id"], None)
             prev, count = self.pending.get(r["id"], (None, 0))
             count = count + 1 if prev == species else 1
             self.pending[r["id"]] = (species, count)
@@ -318,6 +371,8 @@ class Recognizer(threading.Thread):
                 # 性別でデータが違うポケモン (イエッサン等) は、名前の横の ♀/♂ でどちらか決める
                 gender = detect_gender(crop_rect(frame, r["gender"])) if r.get("gender") else None
                 gkey = gender_variant(species, gender, self.state.usage)
+                if hint and not gkey and resolve(hint, self.state.usage).get("has_data"):
+                    gkey = hint  # ニックネームで登録された型 (フォルム違い等) を優先
                 ident = gkey or species
                 changed = current is None or current["species"] != species
                 regender = (not changed and gkey and current["ident"] != gkey and not is_mega(current["ident"]))
@@ -325,6 +380,8 @@ class Recognizer(threading.Thread):
                     log.info("%s: %s%s (%.2f) ← %r", r["id"], species, f" [{gender}]" if gkey else "", score, text)
                     self.state.set_slot(r["id"], ident=ident, side=r.get("side", "opp"), source="auto",
                                         specific=bool(gkey))
+                if via in ("name", "nickname") and r.get("portrait"):
+                    self.learn_base_portrait(frame, r, gkey or species)
             if r.get("portrait"):
                 self.check_mega(frame, r, cfg)
 
@@ -371,14 +428,50 @@ class Recognizer(threading.Thread):
                 self.portraits.add(inner, cand)  # メガシンカ先が 1 つなら確実なので見た目を覚える
             self.state.set_form(r["id"], cand)
 
+    def identify_by_portrait(self, frame, r):
+        """ニックネームで名前が分からないとき、名前の横の顔画像を覚えた顔と照合する。
+        選出画面で相手 (自分) のパーティが分かっていれば、その中から選ぶ。"""
+        if not r.get("portrait") or not self.portraits.items:
+            return None
+        party = [resolve(m, self.state.usage) for m in self.state.parties.get(r.get("side", "opp"), [])]
+        cands = {p["species"] for p in party if p.get("species")}
+        keys = None
+        if cands:
+            keys = {it["key"] for it in self.portraits.list()
+                    if (resolve(it["key"], self.state.usage) or {}).get("species") in cands}
+            if not keys:
+                return None
+        outer, _ = crop_with_margin(frame, r["portrait"])
+        key, score = self.portraits.match(outer, keys=keys)
+        thr = float(self.get_config().get("preview", {}).get("icon_threshold", 0.8))
+        return key if key and score >= thr else None
+
+    def learn_base_portrait(self, frame, r, key):
+        """名前で分かったポケモンの顔画像を覚える (ニックネームのときに顔で判定するため)。
+        メガシンカするポケモンは check_mega が「通常の姿」を慎重に覚えるのでここでは扱わない。
+        見た目が今までと違う (状態異常のマーク等) ときは 3 枚まで追加で覚える。"""
+        species = resolve(key, self.state.usage)["species"]
+        if not species or mega_forms(species):
+            return
+        n = sum(1 for it in self.portraits.list() if it["key"] == key)
+        if n >= 3:
+            return
+        outer, inner = crop_with_margin(frame, r["portrait"])
+        if n:
+            _, score = self.portraits.match(outer, keys={key})
+            if score >= 0.9:
+                return
+        self.portraits.add(inner, key)
+        log.info("顔画像を記憶: %s", key)
+
     def learn_portrait(self, region_id, key):
         """手動でフォルムを選んだとき、そのときの顔画像をそのフォルムの見た目として覚える。"""
         r = next((x for x in self.get_config()["regions"] if x["id"] == region_id), None)
         frame = self.state.frame
         info = resolve(key, self.state.usage) if key else None
-        if not r or not r.get("portrait") or frame is None or not info or not mega_forms(info["species"]):
+        if not r or not r.get("portrait") or frame is None or not info or not info.get("species"):
             return False
-        label = info["key"] if is_mega(info["key"]) else info["species"]
+        label = info["key"] if (is_mega(info["key"]) or not mega_forms(info["species"])) else info["species"]
         _, inner = crop_with_margin(frame, r["portrait"])
         self.portraits.add(inner, label)
         log.info("顔画像を記憶 (手動): %s", label)

@@ -37,44 +37,80 @@ DEFAULT_CONFIG = {
     "preview": {
         "enabled": True,
         "keywords": ["選出"],
-        "marker": {"x": 0.385, "y": 0.214, "w": 0.1525, "h": 0.048},
-        "opp_first": {"x": 0.7725, "y": 0.1246, "w": 0.065, "h": 0.0943},
-        "opp_last": {"x": 0.7725, "y": 0.7064, "w": 0.065, "h": 0.0943},
-        "my_first": {"x": 0.145, "y": 0.1268, "w": 0.125, "h": 0.0433},
-        "my_last": {"x": 0.145, "y": 0.7096, "w": 0.125, "h": 0.0433},
-        # 性別マーク (自分の名前の右 / 相手アイコンの右下)
-        "my_gender_first": {"x": 0.2745, "y": 0.1333, "w": 0.014, "h": 0.0303},
-        "my_gender_last": {"x": 0.2745, "y": 0.7161, "w": 0.014, "h": 0.0303},
-        "opp_gender_first": {"x": 0.8400, "y": 0.1831, "w": 0.013, "h": 0.0282},
-        "opp_gender_last": {"x": 0.8400, "y": 0.7660, "w": 0.013, "h": 0.0282},
         "count": 6,
         "icon_threshold": 0.8,   # アイコン一致度の閾値 (0〜1)
         "auto_my_party": True,   # 自分のパーティを選出画面から自動登録する
+        # marker / opp_first / opp_last / my_first / ... の範囲は PRESETS から設定
     },
     # 表示設定 (設定画面から変更)。フォントは font (PC のフォント) / gfont (Google Fonts) / fontfile (web/fonts のファイル)
     "display": {"font": "", "gfont": "", "fontfile": "", "fontweight": 0},
     # 自分のパーティ (設定画面から登録)
     "my_party": [],
-    # 対戦中のポケモン名の範囲。座標は画面全体に対する割合 (0〜1)。設定画面 (/control) でドラッグして調整する
-    # side: opp = 相手のポケモン名 / me = 自分のポケモン名 (場に出ているポケモンの強調表示に使う)
-    # 既定値はスマホ版のダブルバトル画面 (約 2.14:1) に合わせたもの
-    "regions": [
-        # portrait: 名前の横の顔画像。メガシンカすると変わるので、その判定に使う
-        # gender: 名前の右の性別マーク (♀/♂)。イエッサン等、性別でデータが違うポケモンの判定に使う
-        {"id": "opp1", "label": "相手 左", "side": "opp", "x": 0.65, "y": 0.045, "w": 0.1075, "h": 0.045,
-         "portrait": {"x": 0.611, "y": 0.0429, "w": 0.04, "h": 0.0944},
-         "gender": {"x": 0.7565, "y": 0.0515, "w": 0.014, "h": 0.03}},
-        {"id": "opp2", "label": "相手 右", "side": "opp", "x": 0.8225, "y": 0.045, "w": 0.1075, "h": 0.045,
-         "portrait": {"x": 0.7825, "y": 0.0429, "w": 0.04, "h": 0.0944},
-         "gender": {"x": 0.928, "y": 0.0515, "w": 0.014, "h": 0.03}},
-        {"id": "me1", "label": "自分 左", "side": "me", "x": 0.0975, "y": 0.8964, "w": 0.105, "h": 0.0429,
-         "portrait": {"x": 0.054, "y": 0.8964, "w": 0.045, "h": 0.0922},
-         "gender": {"x": 0.202, "y": 0.9018, "w": 0.014, "h": 0.03}},
-        {"id": "me2", "label": "自分 右", "side": "me", "x": 0.27, "y": 0.8964, "w": 0.105, "h": 0.0429,
-         "portrait": {"x": 0.226, "y": 0.8964, "w": 0.045, "h": 0.0922},
-         "gender": {"x": 0.3745, "y": 0.9018, "w": 0.014, "h": 0.03}},
-    ],
+    # 対戦中のポケモン名の範囲 (画面に対する割合 0〜1)。既定はスマホ版。設定画面で Switch 版に切り替え / 微調整できる
+    "layout": "phone",
+    "regions": None,  # PRESETS から設定 (下の load_config 参照)
 }
+
+
+# 画面レイアウトごとの読み取り範囲 (割合座標)。*_first / *_last は選出画面の 1 匹目と 6 匹目 (間は補間)
+# portrait: 名前の横の顔画像 (メガシンカ・ニックネームの判定) / gender: 性別マーク
+def _r(x, y, w, h):
+    return {"x": x, "y": y, "w": w, "h": h}
+
+
+PRESETS = {
+    # スマホ版 (約 2.14〜2.17:1 の画面で計測)
+    "phone": {
+        "label": "スマホ版",
+        "regions": [
+            {"id": "opp1", "label": "相手 左", "side": "opp", **_r(0.65, 0.045, 0.1075, 0.045),
+             "portrait": _r(0.611, 0.0429, 0.04, 0.0944), "gender": _r(0.7565, 0.0515, 0.014, 0.03)},
+            {"id": "opp2", "label": "相手 右", "side": "opp", **_r(0.8225, 0.045, 0.1075, 0.045),
+             "portrait": _r(0.7825, 0.0429, 0.04, 0.0944), "gender": _r(0.928, 0.0515, 0.014, 0.03)},
+            {"id": "me1", "label": "自分 左", "side": "me", **_r(0.0975, 0.8964, 0.105, 0.0429),
+             "portrait": _r(0.054, 0.8964, 0.045, 0.0922), "gender": _r(0.202, 0.9018, 0.014, 0.03)},
+            {"id": "me2", "label": "自分 右", "side": "me", **_r(0.27, 0.8964, 0.105, 0.0429),
+             "portrait": _r(0.226, 0.8964, 0.045, 0.0922), "gender": _r(0.3745, 0.9018, 0.014, 0.03)},
+        ],
+        "preview": {
+            "marker": _r(0.385, 0.214, 0.1525, 0.048),
+            "opp_first": _r(0.7725, 0.1246, 0.065, 0.0943), "opp_last": _r(0.7725, 0.7064, 0.065, 0.0943),
+            "my_first": _r(0.145, 0.1268, 0.125, 0.0433), "my_last": _r(0.145, 0.7096, 0.125, 0.0433),
+            "my_gender_first": _r(0.2745, 0.1333, 0.014, 0.0303), "my_gender_last": _r(0.2745, 0.7161, 0.014, 0.0303),
+            "opp_gender_first": _r(0.84, 0.1831, 0.013, 0.0282), "opp_gender_last": _r(0.84, 0.766, 0.013, 0.0282),
+        },
+    },
+    # Switch 版 (1920x1080 で計測)
+    "switch": {
+        "label": "Switch 版",
+        "regions": [
+            {"id": "opp1", "label": "相手 左", "side": "opp", **_r(0.6224, 0.0481, 0.1198, 0.0398),
+             "portrait": _r(0.5729, 0.0352, 0.0417, 0.1111), "gender": _r(0.7474, 0.0528, 0.0156, 0.0278)},
+            {"id": "opp2", "label": "相手 右", "side": "opp", **_r(0.8292, 0.0481, 0.1198, 0.0398),
+             "portrait": _r(0.7771, 0.0352, 0.0417, 0.1111), "gender": _r(0.9542, 0.0528, 0.0156, 0.0278)},
+            {"id": "me1", "label": "自分 左", "side": "me", **_r(0.0833, 0.8639, 0.1198, 0.0389),
+             "portrait": _r(0.0302, 0.8565, 0.0469, 0.1065), "gender": _r(0.2047, 0.8685, 0.0156, 0.0278)},
+            {"id": "me2", "label": "自分 右", "side": "me", **_r(0.2896, 0.8639, 0.1198, 0.0389),
+             "portrait": _r(0.2354, 0.8565, 0.0469, 0.1065), "gender": _r(0.4104, 0.8685, 0.0156, 0.0278)},
+        ],
+        "preview": {
+            "marker": _r(0.3646, 0.2454, 0.1797, 0.0398),
+            "opp_first": _r(0.8396, 0.1481, 0.0641, 0.0944), "opp_last": _r(0.8396, 0.7315, 0.0641, 0.0944),
+            "my_first": _r(0.0729, 0.1556, 0.1484, 0.0352), "my_last": _r(0.0729, 0.7389, 0.1484, 0.0352),
+            "my_gender_first": _r(0.2276, 0.1593, 0.0156, 0.0278), "my_gender_last": _r(0.2276, 0.7426, 0.0156, 0.0278),
+            "opp_gender_first": _r(0.9135, 0.212, 0.0146, 0.0259), "opp_gender_last": _r(0.9135, 0.7954, 0.0146, 0.0259),
+        },
+    },
+}
+
+
+def apply_preset(cfg: dict, name: str) -> dict:
+    """読み取り範囲をプリセットに置き換える (その他の設定はそのまま)。"""
+    preset = PRESETS[name]
+    cfg["layout"] = name
+    cfg["regions"] = copy.deepcopy(preset["regions"])
+    cfg.setdefault("preview", {}).update(copy.deepcopy(preset["preview"]))
+    return cfg
 
 
 def _merge(base, override):
@@ -90,12 +126,24 @@ def _merge(base, override):
 _lock = threading.Lock()
 
 
+def _fill_layout(cfg: dict) -> dict:
+    """範囲が未設定 (新規・古い設定) ならプリセットで埋める。"""
+    name = cfg.get("layout") if cfg.get("layout") in PRESETS else "phone"
+    preset = PRESETS[name]
+    if not cfg.get("regions"):
+        cfg["regions"] = copy.deepcopy(preset["regions"])
+    for k, v in preset["preview"].items():
+        cfg["preview"].setdefault(k, copy.deepcopy(v))
+    return cfg
+
+
 def load_config(path: Path = CONFIG_PATH) -> dict:
     with _lock:
         if not path.exists():
-            path.write_text(json.dumps(DEFAULT_CONFIG, ensure_ascii=False, indent=2), encoding="utf-8")
-            return copy.deepcopy(DEFAULT_CONFIG)
-        return _merge(DEFAULT_CONFIG, json.loads(path.read_text(encoding="utf-8-sig")))
+            cfg = _fill_layout(copy.deepcopy(DEFAULT_CONFIG))
+            path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+            return cfg
+        return _fill_layout(_merge(DEFAULT_CONFIG, json.loads(path.read_text(encoding="utf-8-sig"))))
 
 
 def save_config(cfg: dict, path: Path = CONFIG_PATH):
