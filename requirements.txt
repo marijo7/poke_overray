@@ -1,4 +1,5 @@
 Pillow>=10.0
+numpy>=1.24
 obsws-python>=1.7
 mss>=9.0
 # Windows 標準 OCR (Windows.Media.Ocr) を Python から使うためのパッケージ

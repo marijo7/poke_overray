@@ -12,6 +12,7 @@ import logging
 import sys
 
 from overlay.config import load_config
+from overlay.icons import IconDB
 from overlay.recognizer import Recognizer, State
 from overlay.server import App, serve
 from overlay.usage import UsageDB
@@ -35,7 +36,9 @@ def main():
         logging.info("採用率データ: %s %s (%d 匹, 取得 %s)", m.get("format"), m.get("data_date"),
                      len(usage.entries), m.get("fetched_at"))
 
-    state = State(usage, cfg.get("my_party"))
+    icons = IconDB()
+    logging.info("登録済みアイコン: %d 件", len(icons.items))
+    state = State(usage, cfg.get("my_party"), icons)
     recognizer = None
     if not args.no_recognize:
         recognizer = Recognizer(state, lambda: cfg)

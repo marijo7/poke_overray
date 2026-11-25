@@ -1,4 +1,5 @@
 """オーバーレイ (OBS ブラウザソース) と設定画面を配信するローカル Web サーバー。"""
+import io
 import json
 import logging
 import mimetypes
@@ -85,7 +86,8 @@ def make_handler(app: App):
                     return self._send(404, b"no frame", "text/plain")
                 return self._send(200, jpeg, "image/jpeg")
             if path == "/api/config":
-                return self._json({"regions": app.cfg["regions"], "usage": app.cfg["usage"]})
+                return self._json({"regions": app.cfg["regions"], "usage": app.cfg["usage"],
+                                   "preview": app.cfg.get("preview")})
             if path == "/api/pokemon":
                 return self._json([{"key": e["key"], "display": e["display"], "rank": e.get("rank")}
                                    for e in app.usage.list()])
@@ -96,6 +98,23 @@ def make_handler(app: App):
                         seen.add(n)
                         out.append(n)
                 return self._json(out)
+            if path == "/api/icons":
+                from .names import resolve
+                return self._json([{"id": it["id"], "key": it["key"],
+                                    "display": (resolve(it["key"], app.usage) or {}).get("display", it["key"])}
+                                   for it in app.state.icons.list()])
+            m = re.fullmatch(r"/api/icon/([A-Za-z0-9_]+)\.png", path)
+            if m:  # 選出画面で切り出したアイコン / 登録済みアイコン
+                uid = m.group(1)
+                crop = app.state.icon_crops.get(uid)
+                if crop is not None:
+                    buf = io.BytesIO()
+                    crop.save(buf, "PNG")
+                    return self._send(200, buf.getvalue(), "image/png")
+                f = app.state.icons.image_path(uid)
+                if f:
+                    return self._send(200, f.read_bytes(), "image/png")
+                return self._send(404, b"no icon", "text/plain")
             m = re.fullmatch(r"/sprite/(\d+)\.png", path)
             if m:
                 data = get_sprite(int(m.group(1)))
@@ -128,6 +147,14 @@ def make_handler(app: App):
                 regions = body.get("regions")
                 if not isinstance(regions, list):
                     return self._json({"error": "regions required"}, 400)
+                pv = body.get("preview")
+                if isinstance(pv, dict):
+                    cur = app.cfg.setdefault("preview", {})
+                    for k in ("marker", "opp_first", "opp_last", "my_first", "my_last"):
+                        if isinstance(pv.get(k), dict):
+                            cur[k] = {c: min(1.0, max(0.0, float(pv[k][c]))) for c in ("x", "y", "w", "h")}
+                    if "enabled" in pv:
+                        cur["enabled"] = bool(pv["enabled"])
                 clean = []
                 for r in regions:
                     clean.append({"id": str(r["id"]), "label": str(r.get("label", r["id"])),
@@ -135,7 +162,7 @@ def make_handler(app: App):
                                   **{k: min(1.0, max(0.0, float(r[k]))) for k in ("x", "y", "w", "h")}})
                 app.cfg["regions"] = clean
                 save_config(app.cfg)
-                return self._json({"ok": True, "regions": clean})
+                return self._json({"ok": True, "regions": clean, "preview": app.cfg.get("preview")})
             if path == "/api/slot":
                 region = next((r for r in app.cfg["regions"] if r["id"] == body.get("id")), {})
                 app.state.set_slot(body.get("id"), ident=body.get("ident"), side=region.get("side", "opp"),
@@ -152,6 +179,11 @@ def make_handler(app: App):
                     app.cfg["my_party"] = app.state.parties["me"]
                     save_config(app.cfg)
                 return self._json({"ok": True})
+            if path == "/api/icon_label":
+                key = app.state.label_icon(str(body.get("uid", "")), str(body.get("name", "")).strip())
+                return self._json({"ok": bool(key), "key": key})
+            if path == "/api/icon_delete":
+                return self._json({"ok": app.state.icons.remove(str(body.get("id", "")))})
             if path == "/api/reset":
                 app.state.reset()
                 return self._json({"ok": True})

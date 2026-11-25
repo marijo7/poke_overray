@@ -167,6 +167,9 @@ def resolve(ident: str, usage_db=None):
     """パーティ等に登録された識別子 (採用率データのキー / 日本語名) → 表示用情報。"""
     if not ident:
         return None
+    if ident.startswith("icon:"):  # 選出画面で見たが未登録のアイコン
+        return {"key": ident, "display": "?", "species": None, "sprite": None, "icon": ident[5:],
+                "has_data": False}
     entry = None
     if usage_db is not None:
         entry = usage_db.get(ident) or next(

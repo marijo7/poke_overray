@@ -6,6 +6,8 @@ import threading
 import time
 
 from .capture import create_capture
+from .config import save_config
+from .icons import crop_with_margin
 from .names import NameMatcher, normalize, resolve
 from .ocr import create_ocr, preprocess
 
@@ -17,8 +19,10 @@ class State:
 
     PARTY_SIZE = 6
 
-    def __init__(self, usage_db, my_party=None):
+    def __init__(self, usage_db, my_party=None, icons=None):
         self.usage = usage_db
+        self.icons = icons     # IconDB (選出画面のアイコン照合)
+        self.icon_crops = {}   # 未登録アイコンの切り出し画像 uid -> PIL.Image
         self.lock = threading.Lock()
         self.slots = {}        # region id -> {"ident", "species", "side", "source", "updated"}
         # パーティ (識別子 = 採用率データのキー or 日本語名)。自分は config に保存、相手は対戦ごとにリセット
@@ -60,8 +64,30 @@ class State:
                                          "source": source, "updated": time.time()}
                 party = self.parties["opp"]
                 if side == "opp" and all(self._resolve(m)["species"] != info["species"] for m in party):
-                    party.append(info["key"])
+                    unknown = [m for m in party if m.startswith("icon:")]
+                    if len(party) >= self.PARTY_SIZE and len(unknown) == 1:
+                        # 選出画面の未登録アイコンが残り 1 つ → それがこのポケモンだと分かるので自動で覚える
+                        self._label_icon_locked(unknown[0][5:], info["key"])
+                        log.info("アイコンを自動登録: %s", info["display"])
+                    elif len(party) < self.PARTY_SIZE:
+                        party.append(info["key"])
             self.version += 1
+
+    def _label_icon_locked(self, uid, key):
+        crop = self.icon_crops.get(uid)
+        if crop is not None and self.icons is not None:
+            self.icons.add(crop, key)
+        self.parties["opp"] = [key if m == "icon:" + uid else m for m in self.parties["opp"]]
+
+    def label_icon(self, uid, name):
+        """未登録アイコンに名前を付けて登録する。戻り値: 登録したキー"""
+        with self.lock:
+            if uid not in self.icon_crops:
+                return None
+            key = self._resolve(name)["key"]
+            self._label_icon_locked(uid, key)
+            self.version += 1
+            return key
 
     def set_party(self, side, members):
         with self.lock:
@@ -72,6 +98,7 @@ class State:
         with self.lock:
             self.slots.clear()
             self.parties["opp"].clear()
+            self.icon_crops.clear()
             self.version += 1
 
     def snapshot(self, regions):
@@ -107,6 +134,9 @@ class Recognizer(threading.Thread):
         self.stop_event = threading.Event()
         self.reload_event = threading.Event()
         self.pending = {}  # region id -> (species, 連続回数)
+        self.last_preview_seen = 0.0
+        self.battle_no = 0
+        self.preview_opp, self.preview_my = [], []
 
     def _setup(self):
         cfg = self.get_config()
@@ -156,10 +186,75 @@ class Recognizer(threading.Thread):
             last = now
             self.stop_event.wait(max(0.0, cfg.get("interval_sec", 0.5) - (t2 - t0)))
 
+    def _ocr_rect(self, frame, rect, scale):
+        W, H = frame.size
+        box = (int(rect["x"] * W), int(rect["y"] * H), int((rect["x"] + rect["w"]) * W), int((rect["y"] + rect["h"]) * H))
+        if box[2] - box[0] < 4 or box[3] - box[1] < 4:
+            return []
+        return self.ocr.recognize(preprocess(frame.crop(box), scale))
+
     def process_frame(self, frame, cfg):
+        scale = cfg["ocr"].get("scale", getattr(self.ocr, "default_scale", 2.0))
+        pv = cfg.get("preview") or {}
+        if pv.get("enabled"):
+            text = "".join(self._ocr_rect(frame, pv["marker"], scale))
+            self.state.debug["preview"] = {"text": text}
+            if any(k in normalize(text) or k in text for k in pv.get("keywords", ["選出"])):
+                self.process_preview(frame, cfg, pv, scale)
+                return
+        self.process_battle(frame, cfg, scale)
+
+    def process_preview(self, frame, cfg, pv, scale):
+        n = int(pv.get("count", 6))
+        now = time.time()
+        if now - self.last_preview_seen > 30:  # しばらくぶりの選出画面 = 新しい対戦
+            log.info("選出画面を検出: 新しい対戦")
+            self.state.reset()
+            self.pending.clear()
+            self.battle_no += 1
+            self.preview_opp, self.preview_my = [None] * n, [None] * n
+        self.last_preview_seen = now
+        self.state.status["screen"] = "選出画面"
+
+        # 相手: アイコン照合
+        thr = float(pv.get("icon_threshold", 0.8))
+        for i in range(n):
+            outer, inner = crop_with_margin(frame, _lerp(pv["opp_first"], pv["opp_last"], i, n))
+            uid = f"b{self.battle_no}_{i}"
+            self.state.icon_crops[uid] = inner
+            cur = self.preview_opp[i]
+            if cur and not cur.startswith("icon:"):
+                continue  # 特定済み
+            key, score = self.state.icons.match(outer) if self.state.icons else (None, 0.0)
+            self.state.debug[f"icon{i}"] = {"match": key, "score": round(score, 3)}
+            self.preview_opp[i] = key if key and score >= thr else "icon:" + uid
+        opp = [m for m in self.preview_opp if m]
+        if opp != self.state.parties["opp"]:
+            # 手動で名前を付けた分 (icon: → キー) は残す
+            merged = [s if (p and p.startswith("icon:") and s and not s.startswith("icon:")) else p
+                      for p, s in zip(opp, self.state.parties["opp"] + [None] * n)]
+            self.preview_opp = merged
+            self.state.set_party("opp", merged)
+
+        # 自分: 名前を OCR
+        if pv.get("auto_my_party", True):
+            for i in range(n):
+                if self.preview_my[i]:
+                    continue
+                texts = self._ocr_rect(frame, _lerp(pv["my_first"], pv["my_last"], i, n), scale)
+                sp, _ = self.matcher.match(" ".join(texts)) if texts else (None, 0)
+                self.preview_my[i] = sp
+            mine = [m for m in self.preview_my if m]
+            if len(mine) >= n - 2 and mine != self.state.parties["me"]:
+                log.info("自分のパーティを登録: %s", "、".join(mine))
+                self.state.set_party("me", mine)
+                cfg["my_party"] = mine
+                save_config(cfg)
+
+    def process_battle(self, frame, cfg, scale):
+        self.state.status["screen"] = "対戦"
         W, H = frame.size
         need = max(1, int(cfg.get("confirm_frames", 2)))
-        scale = cfg["ocr"].get("scale", getattr(self.ocr, "default_scale", 2.0))
         for r in cfg["regions"]:
             box = (int(r["x"] * W), int(r["y"] * H), int((r["x"] + r["w"]) * W), int((r["y"] + r["h"]) * H))
             if box[2] - box[0] < 4 or box[3] - box[1] < 4:
@@ -186,3 +281,8 @@ class Recognizer(threading.Thread):
 
 def _ema(prev, value, k=0.2):
     return round(value if prev is None else prev * (1 - k) + value * k, 1)
+
+
+def _lerp(a, b, i, n):
+    t = i / (n - 1) if n > 1 else 0
+    return {k: a[k] + (b[k] - a[k]) * t for k in ("x", "y", "w", "h")}

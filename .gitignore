@@ -7,3 +7,5 @@ config.json
 data/usage.json
 # ポケモン画像のキャッシュ (初回表示時に取得)
 data/sprites/
+# 登録した選出画面アイコン (各自の環境で学習)
+data/icons/
