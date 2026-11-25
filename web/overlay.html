@@ -8,6 +8,8 @@
   URL パラメータ:
     slot=opp1          表示する領域 ID (カンマ区切りで複数可。省略時は相手側の領域すべて)
     sprite=0           ポケモンの画像を非表示
+    stats=0            種族値を非表示
+    nature=0           性格 (最も多い型) を非表示
     moves=6 items=3 abilities=2   表示件数 (0 で非表示)
     layout=row         カードを横並びにする (既定は縦並び)
     history=1          この対戦で見た相手の一覧を表示
@@ -59,6 +61,15 @@
   .row-item .fill { position: absolute; inset: 0 auto 0 0; background: var(--bar); opacity: 0.45; border-radius: 4px; }
   .row-item span { position: relative; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row-item .pct { font-variant-numeric: tabular-nums; margin-left: 8px; flex: none; }
+  .stats { display: grid; grid-template-columns: repeat(6, 1fr) auto; gap: 3px; align-items: end; margin: 2px 0 2px; }
+  .stat { text-align: center; font-size: 10px; color: var(--sub); }
+  .stat b { display: block; font-size: 14px; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .stat i { display: block; height: 4px; margin-top: 2px; border-radius: 2px; background: var(--bar-bg); overflow: hidden; }
+  .stat i::after { content: ""; display: block; height: 100%; width: var(--v); background: var(--bar); }
+  .stat.spe b { color: var(--accent); }
+  .stat.total { padding-left: 4px; }
+  .build { font-size: 13px; line-height: 20px; padding: 0 6px; border-radius: 4px; background: var(--bar-bg); display: flex; justify-content: space-between; gap: 8px; }
+  .build .sub { color: var(--sub); font-size: 11px; }
   .mega { font-size: 12px; color: var(--accent); margin: 4px 0 0; }
   .mega b { font-weight: 800; }
   .nodata { font-size: 13px; color: var(--sub); padding: 4px 0; }
@@ -79,7 +90,25 @@
     items: +(q.get("items") ?? 3),
     abilities: +(q.get("abilities") ?? 2),
     sprite: q.get("sprite") !== "0",
+    stats: q.get("stats") !== "0",
+    nature: q.get("nature") !== "0",
   };
+  const LABELS = ["H", "A", "B", "C", "D", "S"];
+
+  function statsBlock(stats) {
+    if (!opt.stats || !stats) return "";
+    const cells = stats.map((v, i) => `<div class="stat${i === 5 ? " spe" : ""}">${LABELS[i]}<b>${v}</b><i style="--v:${Math.min(100, v / 1.8)}%"></i></div>`).join("");
+    return `<div class="sec-title">種族値</div><div class="stats">${cells}<div class="stat total">計<b>${stats.reduce((a, b) => a + b, 0)}</b><i style="--v:0"></i></div></div>`;
+  }
+
+  function natureBlock(p) {
+    if (!opt.nature) return "";
+    if (p.natures && p.natures.length) return section("性格", p.natures, 3);  // 性格の採用率 (手入力等) があれば一覧
+    const b = p.top_build;
+    if (!b) return "";
+    const n = b.nature ? `${esc(b.nature.name)}${b.nature.up ? `<span class="sub"> (${b.nature.up}↑${b.nature.down}↓)</span>` : ""}` : "性格不明";
+    return `<div class="sec-title">最も多い型</div><div class="build"><span>${n} <span class="sub">${esc(b.spread_text)}</span></span><span class="pct">${b.pct.toFixed(1)}%</span></div>`;
+  }
   if (q.get("layout") === "row") document.getElementById("cards").classList.add("row");
   if (q.get("history") === "1") document.getElementById("history").classList.add("show");
   if (q.get("scale")) document.documentElement.style.setProperty("--scale", q.get("scale"));
@@ -101,7 +130,7 @@
     const p = slot.pokemon;
     if (!p) {
       return `<div class="card"><div class="head">${img(slot)}<div class="title"><div class="name">${esc(slot.display || slot.species)}</div></div></div>
-        <div class="nodata">採用率データがありません</div></div>`;
+        ${statsBlock(slot.stats)}<div class="nodata">採用率データがありません</div></div>`;
     }
     const rank = p.rank ? `使用率 ${p.rank}位${p.usage != null ? ` (${p.usage.toFixed(1)}%)` : ""}` : "";
     // メガシンカ前: メガストーンの採用率 / メガシンカ後: 特性はメガシンカ後のものに確定
@@ -113,9 +142,11 @@
     return `<div class="card">
       <div class="head">${img(slot)}<div class="title"><div class="name">${esc(slot.display || p.display)}</div><div class="rank">${rank}</div></div></div>
       ${megaLine}
+      ${statsBlock(slot.stats)}
       ${section("技", p.moves, opt.moves)}
       ${section("持ち物", p.items, opt.items)}
       ${section(slot.mega ? "特性 (メガシンカ後)" : "特性", abilities, opt.abilities)}
+      ${natureBlock(p)}
       <div class="credit">${credit}</div></div>`;
   }
 

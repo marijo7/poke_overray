@@ -8,7 +8,7 @@ import time
 from .capture import create_capture
 from .config import save_config
 from .icons import ICON_DIR, IconDB, crop_with_margin
-from .names import NameMatcher, form_abilities_ja, is_mega, mega_forms, normalize, resolve
+from .names import NameMatcher, base_stats, form_abilities_ja, is_mega, mega_forms, normalize, resolve
 from .ocr import create_ocr, preprocess
 
 log = logging.getLogger(__name__)
@@ -139,6 +139,8 @@ class State:
                     "pokemon": (self.usage.get(info["key"]) or self.usage.find_by_species(info["species"])) if info else None,
                     "mega": is_mega(info["key"]) if info else False,
                     "form_abilities": form_abilities_ja(info["key"]) if info and is_mega(info["key"]) else [],
+                    # 種族値は今の姿 (メガシンカ後ならメガシンカ後) のもの
+                    "stats": base_stats(info["sprite"]) if info else None,
                     "debug": self.debug.get(r["id"]),
                 })
             parties = {}

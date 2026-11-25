@@ -79,6 +79,16 @@ URL パラメータで表示を変えられます（`?` の後に `&` でつな�
 | `layout` | `layout=row` | カードを横並び |
 | `moves` / `items` / `abilities` | `moves=4` | 表示件数（0 で非表示） |
 | `sprite` | `sprite=0` | ポケモンの画像を非表示 |
+| `stats` | `stats=0` | 種族値を非表示 |
+| `nature` | `nature=0` | 性格（最も多い型）を非表示 |
+
+カードには上から「種族値」「技」「持ち物」「特性」「最も多い型（性格・能力ポイント）」を表示します。
+
+- **種族値**: PokeAPI のデータ。メガシンカ後はメガシンカ後の種族値に切り替わります
+- **性格**: Pikalytics のデータにある場合だけ表示します。2026 年 11 月時点では、
+  **ダブル（`gen9championsvgc2026regmc`）には性格のデータが無く**、
+  シングル（`gen9championsou` / `gen9championsbssregma`）には「最も多い型」1 つ（例: ようき H2 A32 S32 33%）だけがあります。
+  `data/usage.json` の各ポケモンに `"natures": [{"name": "ようき", "pct": 60.0}, ...]` を書き足すと、性格の採用率一覧として表示されます
 | `scale` | `scale=1.3` | 拡大率 |
 | `theme` | `theme=light` | 明るい配色 |
 

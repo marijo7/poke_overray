@@ -85,3 +85,29 @@ class TestNames(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStatsNature(unittest.TestCase):
+    def test_base_stats(self):
+        from overlay.names import base_stats, resolve
+        self.assertEqual(base_stats(resolve("ガブリアス")["sprite"]), [108, 130, 95, 80, 85, 102])
+        self.assertEqual(sum(base_stats(resolve("メガフラエッテ")["sprite"])), 651)  # メガシンカ後の種族値
+        self.assertIsNone(base_stats(None))
+
+    def test_nature_and_spread(self):
+        from overlay.names import format_spread, nature_info
+        self.assertEqual(nature_info("Jolly"), {"name": "ようき", "up": "S", "down": "C"})
+        self.assertEqual(nature_info("Hardy")["up"], None)
+        self.assertEqual(format_spread("2/32/0/0/0/32"), "H2 A32 S32")
+
+    def test_parse_top_build(self):
+        import sys
+        sys.path.insert(0, "tools")
+        from update_usage import parse_top_build
+        md = ("The top build for Garchomp features a **Jolly** nature with an EV spread of `2/32/0/0/0/32`. "
+              "This configuration accounts for 33.040% of competitive builds.")
+        b = parse_top_build(md)
+        self.assertEqual((b["nature"]["name"], b["spread_text"], b["pct"]), ("ようき", "H2 A32 S32", 33.04))
+        hidden = parse_top_build(md.replace("**Jolly**", "********"))
+        self.assertIsNone(hidden["nature"])  # 性格が伏せられているフォーマット
+        self.assertIsNone(parse_top_build("No EV spread or nature data available."))

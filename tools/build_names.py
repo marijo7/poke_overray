@@ -70,6 +70,28 @@ def form_abilities(pokemon_rows, pa_rows, ability_en):
     return out
 
 
+def base_stats(rows):
+    """ポケモン ID (画像 ID と同じ) → 種族値 [H, A, B, C, D, S]"""
+    out = {}
+    for pid, stat_id, value, _ in rows:
+        if stat_id in "123456" and len(stat_id) == 1:
+            out.setdefault(pid, [0] * 6)[int(stat_id) - 1] = int(value)
+    return out
+
+
+def natures(nature_rows, name_rows):
+    """性格の英語名 → {ja, up, down}  (up/down は [H,A,B,C,D,S] の添字。無補正は None)"""
+    ja = {r[0]: r[2] for r in name_rows if r[1] == LANG_JA_KANA}
+    en = {r[0]: r[2] for r in name_rows if r[1] == LANG_EN}
+    out = {}
+    for r in nature_rows:
+        nid, down, up = r[0], int(r[2]) - 1, int(r[3]) - 1
+        if nid in en:
+            out[en[nid]] = {"ja": ja.get(nid, en[nid]), "up": None if up == down else up,
+                            "down": None if up == down else down}
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kanji", action="store_true", help="技・持ち物・特性を漢字表記にする")
@@ -84,6 +106,8 @@ def main():
         "species_id": species_ids(species_rows),
         "forms": form_ids(pokemon_rows),
         "mega_stones": mega_stones(fetch_csv("items"), id_to_en(item_name_rows)),
+        "stats": base_stats(fetch_csv("pokemon_stats")),
+        "natures": natures(fetch_csv("natures"), fetch_csv("nature_names")),
         "form_abilities": form_abilities(pokemon_rows, fetch_csv("pokemon_abilities"), id_to_en(ability_name_rows)),
         "moves": build_map(fetch_csv("move_names"), args.kanji),
         "items": build_map(item_name_rows, args.kanji),

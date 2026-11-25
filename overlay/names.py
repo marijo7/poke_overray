@@ -287,3 +287,33 @@ def form_abilities_ja(key: str):
     """メガシンカ後フォルムの特性 (日本語)。該当しなければ空。"""
     ab = load_names().get("form_abilities", {}).get(_identifier(key), [])
     return [translate("abilities", a) for a in ab]
+
+
+# ---- 種族値・性格 ----
+
+STAT_LABELS = ["H", "A", "B", "C", "D", "S"]
+
+
+def base_stats(pid):
+    """画像 ID (= PokeAPI のポケモン ID) → 種族値 [H, A, B, C, D, S]。メガシンカ後のフォルムも可。"""
+    return load_names().get("stats", {}).get(str(pid)) if pid else None
+
+
+def nature_info(en: str):
+    """性格の英語名 → {"name": 日本語名, "up": "S", "down": "C"} (無補正は up/down が None)"""
+    n = load_names().get("natures", {}).get(en)
+    if not n:
+        return {"name": en, "up": None, "down": None}
+    lab = lambda i: STAT_LABELS[i] if i is not None else None
+    return {"name": n["ja"], "up": lab(n["up"]), "down": lab(n["down"])}
+
+
+def format_spread(spread: str) -> str:
+    """'2/32/0/0/0/32' → 'H2 A32 S32' (Champions の能力ポイント。0 は省略)"""
+    try:
+        vals = [int(v) for v in spread.split("/")]
+    except ValueError:
+        return spread
+    if len(vals) != 6:
+        return spread
+    return " ".join(f"{STAT_LABELS[i]}{v}" for i, v in enumerate(vals) if v) or "なし"

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from overlay.config import load_config  # noqa: E402
-from overlay.names import showdown_to_ja, translate  # noqa: E402
+from overlay.names import format_spread, nature_info, showdown_to_ja, translate  # noqa: E402
 
 BASE = "https://www.pikalytics.com/ai/pokedex"
 UA = "poke-overlay/1.0 (personal OBS overlay)"
@@ -57,6 +57,18 @@ def parse_pokemon(md):
     return out, (m.group(1) if m else None)
 
 
+def parse_top_build(md):
+    """「最も多い型」(性格 + 能力ポイント配分 + 割合)。フォーマットによってはデータが無い / 性格が伏せられている。"""
+    m = re.search(r"features a \*\*([^*]*)\*\* nature with an EV spread of `([\d/]+)`\.\s*"
+                  r"This configuration accounts for ([\d.]+)%", md)
+    if not m:
+        return None
+    nature_en = m.group(1).strip()
+    nature = nature_info(nature_en) if nature_en and set(nature_en) != {"*"} else None
+    return {"nature": nature, "nature_en": nature_en if nature else None, "spread": m.group(2),
+            "spread_text": format_spread(m.group(2)), "pct": float(m.group(3))}
+
+
 def list_formats():
     md = get("https://www.pikalytics.com/ai/pokedex")
     for m in re.finditer(r"\*\*Format Code\*\*:\s*`([^`]+)`", md):
@@ -72,6 +84,7 @@ def main():
     ap.add_argument("--limit", type=int, default=50, help="取得するポケモン数 (最大50)")
     ap.add_argument("--delay", type=float, default=1.0, help="リクエスト間隔(秒)")
     ap.add_argument("--list-formats", action="store_true")
+    ap.add_argument("--out", help="保存先 (既定: data/usage.json)")
     args = ap.parse_args()
 
     if args.list_formats:
@@ -103,6 +116,7 @@ def main():
             "usage": usage,
             **{kind: [{"name": translate(kind, n), "en": n, "pct": p} for n, p in sec[kind]]
                for kind in SECTIONS.values()},
+            "top_build": parse_top_build(md),
         })
         print(f"  [{rank}] {display}  技{len(sec['moves'])} 持ち物{len(sec['items'])} 特性{len(sec['abilities'])}")
 
@@ -116,7 +130,7 @@ def main():
         },
         "pokemon": result,
     }
-    out = ROOT / "data" / "usage.json"
+    out = Path(args.out) if args.out else ROOT / "data" / "usage.json"
     out.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"保存しました: {out} ({len(result)} 匹)")
 
