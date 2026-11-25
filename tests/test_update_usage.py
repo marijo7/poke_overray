@@ -37,3 +37,35 @@ class TestChampionsBattleData(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFetchOncePerDay(unittest.TestCase):
+    def write(self, meta):
+        import json
+        import tempfile
+        from pathlib import Path
+        f = Path(tempfile.mkdtemp()) / "usage.json"
+        f.write_text(json.dumps({"meta": meta, "pokemon": []}), encoding="utf-8")
+        return f
+
+    def test_rules(self):
+        import datetime
+        today = datetime.date(2026, 11, 25)
+        f = self.write({"source_id": "championsbattledata", "format_requested": "Doubles",
+                        "fetched_at": "2026-11-25T06:40:15"})
+        self.assertIsNotNone(update_usage.fetched_today(f, "championsbattledata", "Doubles", today))  # 今日・同じ → 取得しない
+        self.assertIsNone(update_usage.fetched_today(f, "championsbattledata", "Singles", today))     # 形式が違う → 取得する
+        self.assertIsNone(update_usage.fetched_today(f, "pikalytics", "Doubles", today))             # データ元が違う → 取得する
+        self.assertIsNone(update_usage.fetched_today(f, "championsbattledata", "Doubles",
+                                                     datetime.date(2026, 11, 26)))                   # 翌日 → 取得する
+
+    def test_old_meta_and_missing_file(self):
+        import datetime
+        from pathlib import Path
+        today = datetime.date(2026, 11, 25)
+        # 以前の形式のデータ (source_id が無い) でも判定できる
+        f = self.write({"source": "Pokémon Champions Battle Data", "format": "Doubles M7",
+                        "fetched_at": "2026-11-25T06:40:15"})
+        self.assertIsNotNone(update_usage.fetched_today(f, "championsbattledata", "Doubles", today))
+        self.assertIsNone(update_usage.fetched_today(Path("/nonexistent/usage.json"), "championsbattledata",
+                                                     "Doubles", today))

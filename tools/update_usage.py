@@ -10,6 +10,9 @@
     python tools/update_usage.py --format Singles
     python tools/update_usage.py --source pikalytics --format gen9championsou
     python tools/update_usage.py --source pikalytics --list-formats
+    python tools/update_usage.py --force                  # 今日すでに取得済みでも取得し直す
+
+同じデータ元・形式のデータを今日すでに取得している場合は、データ元に負荷をかけないよう取得しない (1 日 1 回まで)。
 """
 import argparse
 import datetime
@@ -145,6 +148,24 @@ def fetch_cbd(fmt, limit, delay):
     return result, meta
 
 
+SOURCE_NAMES = {"championsbattledata": "Pokémon Champions Battle Data", "pikalytics": "Pikalytics"}
+
+
+def fetched_today(path: Path, source: str, fmt: str, today=None):
+    """path のデータが、同じデータ元・形式で今日 (PC の日付) 取得したものなら、その取得日時を返す。違えば None。"""
+    today = today or datetime.date.today()
+    try:
+        meta = json.loads(path.read_text(encoding="utf-8")).get("meta", {})
+        fetched = datetime.datetime.fromisoformat(meta["fetched_at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None  # データが無い・壊れている → 取得する
+    same_source = meta.get("source_id", None) == source or meta.get("source") == SOURCE_NAMES[source]
+    same_format = (meta.get("format_requested") or meta.get("format") or "").split(" ")[0].lower() == fmt.lower()
+    if fetched.date() == today and same_source and same_format:
+        return fetched
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", choices=["championsbattledata", "pikalytics"], help="データ元")
@@ -153,6 +174,7 @@ def main():
     ap.add_argument("--delay", type=float, default=0.5, help="リクエスト間隔(秒)")
     ap.add_argument("--list-formats", action="store_true", help="Pikalytics のフォーマット一覧")
     ap.add_argument("--out", help="保存先 (既定: data/usage.json)")
+    ap.add_argument("--force", action="store_true", help="今日すでに取得済みでも取得し直す")
     args = ap.parse_args()
 
     if args.list_formats:
@@ -165,17 +187,27 @@ def main():
         fmt = args.format or ucfg.get("format") or "Doubles"
         if fmt.startswith("gen9"):  # 旧設定 (Pikalytics のコード) からの移行
             fmt = "Singles" if ("ou" in fmt or "bss" in fmt) else "Doubles"
-        print(f"データ元: Pokémon Champions Battle Data / {fmt}")
-        result, meta = fetch_cbd(fmt, args.limit or 100, args.delay)
+        fmt = {"doubles": "Doubles", "singles": "Singles"}.get(fmt.lower(), "Doubles")
     else:
         fmt = args.format or ucfg.get("pikalytics_format") or "gen9championsvgc2026regmc"
-        print(f"データ元: Pikalytics / {fmt}")
+    out = Path(args.out) if args.out else ROOT / "data" / "usage.json"
+
+    done = None if args.force else fetched_today(out, source, fmt)
+    if done:
+        print(f"今日 ({done:%m/%d %H:%M}) すでに {SOURCE_NAMES[source]} / {fmt} のデータを取得済みのため、取得しません。")
+        print("取得し直す場合は --force を付けて実行してください (update_usage.bat --force)。")
+        return
+
+    print(f"データ元: {SOURCE_NAMES[source]} / {fmt}")
+    if source == "championsbattledata":
+        result, meta = fetch_cbd(fmt, args.limit or 100, args.delay)
+    else:
         result, meta = fetch_pikalytics(fmt, args.limit or 50, args.delay)
     if not result:
         sys.exit("採用率データを取得できませんでした")
 
     meta["fetched_at"] = datetime.datetime.now().isoformat(timespec="seconds")
-    out = Path(args.out) if args.out else ROOT / "data" / "usage.json"
+    meta["source_id"], meta["format_requested"] = source, fmt  # 次回の「今日取得済み」判定に使う
     out.write_text(json.dumps({"meta": meta, "pokemon": result}, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"保存しました: {out} ({len(result)} 匹)")
 
