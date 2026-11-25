@@ -22,6 +22,9 @@ _FORM_JA = {
     "Wash": "ウォッシュ", "Heat": "ヒート", "Frost": "フロスト", "Fan": "スピン", "Mow": "カット",
     "F": "♀", "M": "♂", "Female": "♀", "Male": "♂", "Therian": "れいじゅう", "Eternal": "えいえんのはな", "Bloodmoon": "アカツキ",
     "Hearthflame": "かまどのめん", "Wellspring": "いどのめん", "Cornerstone": "いしずえのめん",
+    "Four": "4ひきかぞく", "Three": "3びきかぞく", "Fancy": "ファンシーなもよう", "Dusk": "たそがれ",
+    "Midnight": "まよなか", "Midday": "まひる", "Aqua": "ウォーター", "Blaze": "ブレイズ", "Combat": "コンバット",
+    "Shield": "シールド", "Blade": "ブレード", "Origin": "オリジン", "Incarnate": "けしん",
 }
 
 
@@ -95,7 +98,9 @@ def showdown_to_ja(name: str):
 
 def translate(kind: str, en: str) -> str:
     """kind: moves / items / abilities。辞書に無ければ英語のまま。"""
-    return unicodedata.normalize("NFKC", load_names()[kind].get(en, en))
+    table = load_names()[kind]
+    ja = table.get(en) or table.get(en.replace("'", "’")) or table.get(en.replace("’", "'")) or en
+    return unicodedata.normalize("NFKC", ja)
 
 
 class NameMatcher:

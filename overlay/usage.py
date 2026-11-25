@@ -48,7 +48,10 @@ class UsageDB:
         if self.natures_path.exists():
             self.manual_natures = json.loads(self.natures_path.read_text(encoding="utf-8"))
         for key, e in self.entries.items():
-            e["natures"] = self._decorate(self.manual_natures.get(key, []))
+            # データ元の性格 (championsbattledata) を元に、手入力があればそちらを優先
+            e.setdefault("_natures_src", e.get("natures") or [])
+            e["natures"] = self._decorate(self.manual_natures.get(key) or e["_natures_src"])
+            e["natures_manual"] = key in self.manual_natures
 
     @staticmethod
     def _decorate(items):
@@ -70,7 +73,9 @@ class UsageDB:
                 self.manual_natures.pop(key, None)
             self.natures_path.write_text(json.dumps(self.manual_natures, ensure_ascii=False, indent=1), encoding="utf-8")
             if key in self.entries:
-                self.entries[key]["natures"] = self._decorate(clean)
+                e = self.entries[key]
+                e["natures"] = self._decorate(clean or e.get("_natures_src", []))
+                e["natures_manual"] = bool(clean)
         return clean
 
     def get(self, key):

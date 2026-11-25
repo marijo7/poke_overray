@@ -80,16 +80,15 @@ URL パラメータで表示を変えられます（`?` の後に `&` でつな�
 | `moves` / `items` / `abilities` | `moves=4` | 表示件数（0 で非表示） |
 | `sprite` | `sprite=0` | ポケモンの画像を非表示 |
 | `stats` | `stats=0` | 種族値を非表示 |
-| `nature` | `nature=0` | 性格（最も多い型）を非表示 |
+| `nature` | `nature=0` | 性格・能力ポイントを非表示 |
+| `natures` / `spreads` | `natures=2&spreads=1` | 性格 / 能力ポイントの表示件数 |
 
 カードには上から「種族値」「技」「持ち物」「特性」「最も多い型（性格・能力ポイント）」を表示します。
 
 - **種族値**: PokeAPI のデータ。メガシンカ後はメガシンカ後の種族値に切り替わります
-- **性格**: Pikalytics のデータにある場合だけ表示します。2026 年 11 月時点では、
-  **ダブル（`gen9championsvgc2026regmc`）には性格のデータが無く**、
-  シングル（`gen9championsou` / `gen9championsbssregma`）には「最も多い型」1 つ（例: ようき H2 A32 S32 33%）だけがあります。
-  Pikalytics の Web ページにも、ダブルの性格データは表示されていません（2026 年 11 月に確認）
-- **性格の手入力**: 設定画面の「性格の採用率 (手入力)」で、ポケモンを選んで（場に出ているポケモンはボタンで選べます）
+- **性格・能力ポイント**: 性格の採用率と、能力ポイント配分の採用率（例: H2 A32 S32 33.6%）を表示します。
+  取得元を Pikalytics にした場合、ダブルには性格データがありません（シングルは「最も多い型」1 つのみ）
+- **性格の手入力**（任意）: データ元と違う値を出したいときは、設定画面の「性格の採用率 (手入力)」で、ポケモンを選んで（場に出ているポケモンはボタンで選べます）
   性格と % を入力して保存すると、カードに性格の採用率が表示されます。ゲーム内の「バトルデータ」を見て入れるのがおすすめです。
   `data/natures.json` に保存され、採用率データを更新しても消えません。`natures=3` パラメータで表示件数を変えられます
 | `scale` | `scale=1.3` | 拡大率 |
@@ -189,22 +188,23 @@ NVIDIA の GPU で CUDA を使う場合は `onnxruntime-gpu` と CUDA / cuDNN �
 
 ## 採用率データの更新
 
-採用率は [Pikalytics](https://www.pikalytics.com/) が公開しているデータ（使用率上位 50 匹）を取得し、
-[PokeAPI](https://pokeapi.co/) の名前データで日本語に変換しています。オーバーレイ下部に出典が表示されます。
+採用率は [Pokémon Champions Battle Data](https://championsbattledata.com/) の公開 API から取得します（既定）。
+ランクバトルのバトルデータ（技・持ち物・特性・**性格**・**能力ポイント配分**の上位 10 件）で、毎日更新されています。
+日本語名は [PokeAPI](https://pokeapi.co/) のデータで変換しています。
+同 API の[利用規約](https://championsbattledata.com/api-rules/)に従い、オーバーレイ下部に出典を表示しています（表示を消さないでください）。
 
-`update_usage.bat` をダブルクリックすると最新データに更新されます（起動中なら設定画面の「採用率データ再読込」で反映）。
+`update_usage.bat` をダブルクリックすると最新データに更新されます（使用率上位 100 匹、1 分ほど）。
+起動中なら設定画面の「採用率データ再読込」で反映されます。対戦前に 1 日 1 回程度の更新がおすすめです。
 
-対象のルールは `config.json` の `"usage": {"format": ...}` で変えられます。
+`config.json` の `usage` で取得元を変えられます。
 
-| フォーマット | 内容 |
+| 設定 | 内容 |
 |---|---|
-| `gen9championsvgc2026regmc` | ダブル（レギュレーション M-C）※既定 |
-| `gen9championsvgc2026regmcbo3` | ダブル M-C（3 本先取の大会データ） |
-| `gen9championsou` | シングル |
-| `gen9championsbssregma` | シングル（レギュレーション M-A） |
+| `"source": "championsbattledata", "format": "Doubles"` | ダブル（既定） |
+| `"source": "championsbattledata", "format": "Singles"` | シングル |
+| `"source": "pikalytics", "pikalytics_format": "..."` | Pikalytics（性格データなし。フォーマットは `update_usage.bat --source pikalytics --list-formats`） |
 
-利用可能なフォーマットは `update_usage.bat --list-formats` で確認できます。
-`data/usage.json` は手で編集しても構いません（ゲーム内の「バトルデータ」を見て自分で書き込むことも可能）。
+> 使用率の「%」はデータ元に無いため、カードには順位だけを表示します。
 
 ## 設定項目 (config.json)
 
@@ -236,7 +236,7 @@ NVIDIA の GPU で CUDA を使う場合は `onnxruntime-gpu` と CUDA / cuDNN �
 - Pokémon Champions の画面レイアウトは実機で検証していません。読み取り範囲は各自で合わせてください
 - メガシンカなどのフォルム違いは「種族名」で判定し、データ上で最も使用率の高いフォルムを表示します。
   別フォルムを表示したいときは手動で選んでください
-- 採用率データは Pikalytics の集計で、ゲーム内の「バトルデータ」とは数値が異なる場合があります
+- 採用率データは非公式の集計で、ゲーム内の「バトルデータ」と数値が異なる場合や、取得時点より古い場合があります
 
 ## 開発者向け
 
@@ -250,7 +250,7 @@ overlay/recognizer.py 認識ループと共有状態 (選出画面 / 対戦中)
 overlay/server.py     HTTP サーバー (/overlay, /control, /api/*)
 web/                  オーバーレイと設定画面
 tools/build_names.py  data/names.json の再生成 (PokeAPI)
-tools/update_usage.py 採用率データの取得 (Pikalytics)
+tools/update_usage.py 採用率データの取得 (Pokémon Champions Battle Data / Pikalytics)
 ```
 
 テスト: `python -m unittest discover -s tests -t .`
@@ -259,6 +259,6 @@ Windows 以外で動作確認する場合は Tesseract（`jpn` 言語データ�
 
 ## クレジット
 
-- 採用率データ: [Pikalytics](https://www.pikalytics.com/)
+- 採用率データ: Battle data provided by [Pokémon Champions Battle Data](https://championsbattledata.com/)（取得元を変えた場合は [Pikalytics](https://www.pikalytics.com/)）
 - 日本語名データ・ポケモン画像の取得元: [PokeAPI](https://pokeapi.co/)（画像の著作権は株式会社ポケモン等に帰属します。リポジトリには含めず、各自の PC に保存されます）
 - ポケモンは任天堂・クリーチャーズ・ゲームフリークの登録商標です。本ツールは非公式のファンメイドツールです。
