@@ -38,6 +38,7 @@ class State:
         self.type_crops = {}   # uid -> ((左のタイプ 余白付き, 余白なし), (右のタイプ 余白付き, 余白なし))
         self.type_db = IconDB(ICON_DIR.parent / "types") if icons is not None else None  # タイプアイコン (学習)
         self.icon_guess = {}   # uid -> {"types": [...], "cands": [...], "guess": キー or None}: タイプからの推定
+        self.mega_used = {}    # side -> メガシンカしたポケモン (1 回の対戦で 1 人 1 匹まで)
         self.lock = threading.Lock()
         self.slots = {}        # region id -> {"ident", "species", "side", "source", "updated"}
         # パーティ (識別子 = 採用率データのキー or 日本語名)。自分は config に保存、相手は対戦ごとにリセット
@@ -189,6 +190,7 @@ class State:
             self.type_crops.clear()
             self.icon_guess.clear()
             self.unknown_nicks.clear()  # 未登録ニックネームの入力欄も対戦ごとに消す (登録済みのニックネームは残す)
+            self.mega_used.clear()
             self.version += 1
 
     def snapshot(self, regions):
@@ -656,6 +658,15 @@ class Recognizer(threading.Thread):
                 sp, sc = self.matcher.match(t)
                 if sp and sc > score:
                     species, score = sp, sc
+            if not species and not (texts and self.state.nicknames.match(text)):
+                # 読めなかったら、白い文字だけを取り出してもう一度 (選出画面の文字で効果があった方法)
+                texts2 = self.ocr.recognize(self.white_text(crop))
+                for t in texts2:
+                    sp, sc = self.matcher.match(t)
+                    if sp and sc > score:
+                        species, score = sp, sc
+                if species or (texts2 and not texts):
+                    texts, text = texts2, " / ".join(texts2)
             hint, via = None, "name"
             if not species and texts and looks_like_name(text):
                 # ポケモン名ではない = ニックネーム。登録済みならそれ、無ければ顔画像で判定
@@ -732,18 +743,36 @@ class Recognizer(threading.Thread):
             if key is None:
                 return
         self.state.debug.setdefault(r["id"], {})["portrait"] = {"match": key, "score": round(score, 3)}
+        side = r.get("side", "opp")
+        if self.state.mega_used.get(side) and self.state.mega_used[side] != species:
+            return  # メガシンカは 1 回の対戦で 1 人 1 匹まで (もう別のポケモンがメガシンカしている)
         if score >= thr:
-            cand = key if key != species else None
+            cand = key if key != species else None  # 覚えた見た目 (通常 / メガシンカ後) と一致
         else:
-            cand = self._guess_mega(species, forms)  # 未知の見た目 = まだ覚えていないメガシンカ後の姿
+            # 覚えた「通常」の見た目と違う。状態異常のマーク・選択中の光・技のエフェクトでも変わるので、
+            # Champions の画像で「通常の姿」と「メガシンカ後の姿」のどちらに近いかを確かめる
+            cand = self.mega_by_champion(outer, species, forms)
         prev, n = self.portrait_pending.get(r["id"], (None, 0))
         n = n + 1 if cand == prev else 1
         self.portrait_pending[r["id"]] = (cand, n)
-        if cand and n >= 3:
+        if cand and n >= 4:
             log.info("%s: メガシンカを検出 → %s (一致度 %.2f)", r["id"], cand, score)
-            if score < thr and len(forms) == 1:
-                self.portraits.add(inner, cand)  # メガシンカ先が 1 つなら確実なので見た目を覚える
+            if score < thr:
+                self.portraits.add(inner, cand)  # 画像で確かめたメガシンカ後の見た目を覚える
+            self.state.mega_used[side] = species
             self.state.set_form(r["id"], cand)
+
+    def mega_by_champion(self, outer, species, forms):
+        """顔画像が、通常の姿よりメガシンカ後の姿 (Champions の画像) に近ければ、そのメガシンカ先。
+        実測: 本物のメガシンカは メガ 0.47 / 通常 0.41、通常の姿は (Zz マーク・光を重ねても) 通常が 0.04〜0.16 上回った。
+        画像が無ければメガシンカとは判断しない (以前は「見た目が変わった」だけで判断して誤検出していた)。"""
+        base = self.champ_key(species)
+        megas = [f for f in forms if self.champ.path(f)]
+        if not base or not self.champ.path(base) or not megas:
+            return None
+        scored = {k: (c + e) / 2 for k, c, e in self.champ.rank(outer, [base, *megas])}
+        best = max(megas, key=lambda k: scored.get(k, -1))
+        return best if scored.get(best, -1) - scored.get(base, -1) >= 0.04 else None
 
     def identify_by_portrait(self, frame, r):
         """ニックネームで名前が分からないとき、名前の横の顔画像を覚えた顔と照合する。
@@ -793,14 +822,6 @@ class Recognizer(threading.Thread):
         self.portraits.add(inner, label)
         log.info("顔画像を記憶 (手動): %s", label)
         return True
-
-    def _guess_mega(self, species, forms):
-        if len(forms) == 1:
-            return forms[0]
-        entry = self.state.usage.find_by_species(species)
-        megas = (entry or {}).get("mega") or []
-        return max(megas, key=lambda m: m["pct"])["key"] if megas else forms[0]
-
 
 def _ema(prev, value, k=0.2):
     return round(value if prev is None else prev * (1 - k) + value * k, 1)

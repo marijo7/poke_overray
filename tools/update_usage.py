@@ -161,7 +161,10 @@ def fetch_champion_icons(roster, delay=0.1):
         miss_path.write_text(json.dumps(missing, ensure_ascii=False, indent=0), encoding="utf-8")
         if any(r not in m for r in new):
             print(f"  画像がまだ無いポケモン: {'、'.join(r for r in new if r not in m)} (7 日後にもう一度探します)")
-    todo = [r for r in roster if r in m and not (ICON_DIR / f"{r}.png").exists()]
+    # メガシンカ後の姿も (対戦中のメガシンカの判定に使う): 名前が「<使えるポケモン>-Mega...」のもの
+    bases = set(roster)
+    megas = [k for k in m if "-Mega" in k and k.split("-Mega")[0] in bases]
+    todo = [r for r in [*roster, *megas] if r in m and not (ICON_DIR / f"{r}.png").exists()]
     if todo:
         print(f"ポケモン画像を取得中: {len(todo)} 枚")
     for r in todo:

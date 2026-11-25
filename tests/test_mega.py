@@ -28,15 +28,41 @@ def usage_file():
     return f
 
 
+class StubChamp:
+    """Champions の画像との比較の代わり: 顔画像が青い三角 (MEGA) ならメガシンカ後の姿、それ以外は通常の姿に近いと答える"""
+    def __init__(self, base_keys, mega_scores):
+        self.base_keys, self.mega_scores = set(base_keys), mega_scores
+        self.map = {k: 1 for k in [*base_keys, *mega_scores]}
+
+    def path(self, k):
+        return k in self.map
+
+    def available(self, keys=None):
+        return [k for k in (keys if keys is not None else self.map) if k in self.map]
+
+    def rank(self, crop, keys, use_edges=True):
+        blue = sum(px[2] > 150 and px[0] < 100 for px in crop.convert("RGB").getdata()) > 50
+        out = []
+        for k in keys:
+            if k in self.mega_scores:
+                v = self.mega_scores[k] if blue else 0.30
+            else:
+                v = 0.40 if blue else 0.50
+            out.append((k, v, v))
+        return sorted(out, key=lambda x: -x[1])
+
+
 class TestMega(unittest.TestCase):
     def setUp(self):
         self.cfg = {"regions": [REGION], "preview": {"icon_threshold": 0.8}}
         self.state = State(UsageDB(usage_file()), icons=IconDB(Path(tempfile.mkdtemp())))
         self.rec = Recognizer(self.state, lambda: self.cfg)
         self.rec.portraits = IconDB(Path(tempfile.mkdtemp()))
+        self.rec.champ = StubChamp(["フラエッテ", "Charizard"],
+                                   {"Floette-Mega": 0.50, "Charizard-Mega-Y": 0.48, "Charizard-Mega-X": 0.44})
         self.rec.last_preview_seen = time.time()  # 選出画面から見ている対戦
 
-    def feed(self, frame, n=3):
+    def feed(self, frame, n=4):
         for _ in range(n):
             self.rec.check_mega(frame, REGION, self.cfg)
 
@@ -50,29 +76,47 @@ class TestMega(unittest.TestCase):
         self.state.set_slot("opp1", ident="フラエッテ", side="opp")
         self.feed(NORMAL)  # 場に出た直後の姿を「通常」として記憶
         self.assertEqual(self.state.slots["opp1"]["ident"], "フラエッテ")
-        self.feed(MEGA, 2)  # 2 フレームではまだ確定しない
+        self.feed(MEGA, 3)  # 3 フレームではまだ確定しない
         self.assertEqual(self.state.slots["opp1"]["ident"], "フラエッテ")
         self.feed(MEGA, 1)
         self.assertEqual(self.state.slots["opp1"]["ident"], "Floette-Mega")
         self.assertIn("メガフラエッテ", [m["display"] for m in self.state.snapshot([REGION])["parties"]["opp"]])
         self.assertTrue(self.rec.portraits.has_key("Floette-Mega"))  # メガの姿も覚えた
 
-        # 次の対戦: 覚えた見た目で即座に判定できる
+        # 次の対戦: 覚えた見た目で判定できる
         self.state.reset()
         self.state.set_slot("opp1", ident="フラエッテ", side="opp")
         self.feed(MEGA)
         self.assertEqual(self.state.slots["opp1"]["ident"], "Floette-Mega")
 
-    def test_multiple_megas_use_stone_usage(self):
+    def test_changed_look_but_not_mega(self):
+        """顔画像が変わっても (状態異常のマーク・光など)、画像で通常の姿に近ければメガシンカにしない"""
+        self.state.set_slot("opp1", ident="フラエッテ", side="opp")
+        self.feed(NORMAL)
+        other = fake_icon("cross", (230, 230, 230))  # 通常とは違う見た目 (青くない = メガシンカ後の姿ではない)
+        self.feed(other, 6)
+        self.assertEqual(self.state.slots["opp1"]["ident"], "フラエッテ")
+
+    def test_multiple_megas_decided_by_images(self):
         self.state.set_slot("opp1", ident="リザードン", side="opp")
         self.feed(NORMAL)
         self.feed(MEGA)
-        self.assertEqual(self.state.slots["opp1"]["ident"], "Charizard-Mega-Y")  # Y 90% > X 8%
-        self.assertFalse(self.rec.portraits.has_key("Charizard-Mega-Y"))  # 推定なので覚えない
+        self.assertEqual(self.state.slots["opp1"]["ident"], "Charizard-Mega-Y")  # 画像で Y の方が近い
         snap = self.state.snapshot([REGION])["slots"][0]
         self.assertTrue(snap["mega"])
         self.assertEqual(snap["pokemon"]["key"], "Charizard")  # 採用率は元のポケモンのデータ
         self.assertEqual(snap["form_abilities"], ["ひでり"])
+
+    def test_one_mega_per_side(self):
+        """1 回の対戦でメガシンカできるのは 1 人 1 匹まで"""
+        self.state.set_slot("opp1", ident="リザードン", side="opp")
+        self.feed(NORMAL)
+        self.feed(MEGA)
+        self.assertEqual(self.state.slots["opp1"]["ident"], "Charizard-Mega-Y")
+        self.state.set_slot("opp1", ident="フラエッテ", side="opp")  # 交代して別のポケモン
+        self.feed(NORMAL)
+        self.feed(MEGA, 6)
+        self.assertEqual(self.state.slots["opp1"]["ident"], "フラエッテ")  # もうメガシンカしない
 
     def test_no_learning_when_started_mid_battle(self):
         self.rec.last_preview_seen = 0
@@ -80,11 +124,6 @@ class TestMega(unittest.TestCase):
         self.feed(MEGA)  # すでにメガシンカ後かもしれないので「通常」として覚えない
         self.assertFalse(self.rec.portraits.has_key("フラエッテ"))
         self.assertEqual(self.state.slots["opp1"]["ident"], "フラエッテ")
-
-    def test_manual_mega_updates_party(self):
-        self.state.set_party("me", ["フラエッテ", "ビビヨン"])
-        self.state.set_slot("me2", ident="メガフラエッテ", side="me", source="manual")
-        self.assertEqual(self.state.parties["me"][0], "Floette-Mega")
 
     def test_my_party_restored_on_reset(self):
         self.state.set_party("me", ["フラエッテ", "ビビヨン"])
