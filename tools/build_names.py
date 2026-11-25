@@ -121,6 +121,8 @@ def main():
         "forms": form_ids(pokemon_rows),
         "mega_stones": mega_stones(fetch_csv("items"), id_to_en(item_name_rows)),
         "stats": base_stats(fetch_csv("pokemon_stats")),
+        # 見た目にオス・メスの違いがある種族 (全国図鑑番号)。メスなら HOME のメスの画像を使う
+        "gender_diff": sorted(int(r[0]) for r in fetch_csv("pokemon_species") if r[13] == "1"),
         "types": pokemon_types(type_rows := fetch_csv("types"), fetch_csv("pokemon_types")),
         "type_names": type_names(type_rows, fetch_csv("type_names")),
         "natures": natures(fetch_csv("natures"), fetch_csv("nature_names")),

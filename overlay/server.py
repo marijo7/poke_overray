@@ -22,6 +22,11 @@ SPRITE_URLS = [
     "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/{id}.png",
     "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{id}.png",
 ]
+# メスの姿 (見た目にオス・メスの違いがあるポケモン)。無ければ通常の画像
+SPRITE_URLS_F = [
+    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/female/{id}.png",
+    "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/female/{id}.png",
+] + SPRITE_URLS
 log = logging.getLogger(__name__)
 _sprite_lock = threading.Lock()
 _sprite_failed = {}       # pid -> 最後に失敗した時刻 (失敗が続く画像を何度も取りに行かない)
@@ -55,16 +60,19 @@ def prefetch_sprites(pids):
     threading.Thread(target=run, daemon=True).start()
 
 
-def get_sprite(pid: int):
+def get_sprite(pid):
+    """pid: ポケモン ID。末尾が f ならメスの姿 (例: 668f)"""
+    pid = str(pid)
+    female = pid.endswith("f")
     path = SPRITE_DIR / f"{pid}.png"
     if path.exists():
         return path.read_bytes()
     with _sprite_lock:
         if path.exists():
             return path.read_bytes()
-        for url in SPRITE_URLS:
+        for url in (SPRITE_URLS_F if female else SPRITE_URLS):
             try:
-                req = urllib.request.Request(url.format(id=pid), headers={"User-Agent": "poke-overlay/1.0"})
+                req = urllib.request.Request(url.format(id=pid.rstrip("f")), headers={"User-Agent": "poke-overlay/1.0"})
                 with urllib.request.urlopen(req, timeout=10) as r:
                     data = r.read()
             except Exception as e:
@@ -178,9 +186,9 @@ def make_handler(app: App):
                     if f:
                         return self._send(200, f.read_bytes(), "image/png")
                 return self._send(404, b"no icon", "text/plain")
-            m = re.fullmatch(r"/sprite/(\d+)\.png", path)
+            m = re.fullmatch(r"/sprite/(\d+f?)\.png", path)
             if m:
-                data = get_sprite(int(m.group(1)))
+                data = get_sprite(m.group(1))
                 if data is None:
                     return self._send(404, b"no sprite", "text/plain")
                 self.send_response(200)

@@ -196,6 +196,14 @@ def resolve(ident: str, usage_db=None):
     """パーティ等に登録された識別子 (採用率データのキー / 日本語名) → 表示用情報。"""
     if not ident:
         return None
+    if ident.endswith(("#F", "#M")):  # 見た目にオス・メスの違いがあるポケモンの性別 (例: Pyroar#F = メスのカエンジシ)
+        info = resolve(ident[:-2], usage_db)
+        if info and info.get("sprite") and has_gender_diff(info["species"]) and ident.endswith("#F"):
+            disp = info["display"] if "♀" in info["display"] else info["display"] + "(♀)"
+            info = dict(info, key=ident, display=disp, sprite=f"{info['sprite']}f", gender="F")  # 画像はメスの姿
+        elif info:
+            info = dict(info, key=ident, gender=ident[-1])
+        return info
     if ident.startswith("nick:"):  # 未登録のニックネーム (何のポケモンか分からない)
         return {"key": ident, "display": ident[5:], "species": None, "sprite": None, "nick": ident[5:],
                 "has_data": False}
@@ -319,7 +327,7 @@ STAT_LABELS = ["H", "A", "B", "C", "D", "S"]
 
 def base_stats(pid):
     """画像 ID (= PokeAPI のポケモン ID) → 種族値 [H, A, B, C, D, S]。メガシンカ後のフォルムも可。"""
-    return load_names().get("stats", {}).get(str(pid)) if pid else None
+    return load_names().get("stats", {}).get(str(pid).rstrip("f")) if pid else None
 
 
 def nature_info(en: str):
@@ -381,8 +389,34 @@ def types_of(key: str, usage_db=None):
     info = resolve(key, usage_db)
     if not info or not info.get("sprite"):
         return []
-    return load_names().get("types", {}).get(str(info["sprite"]), [])
+    return load_names().get("types", {}).get(str(info["sprite"]).rstrip("f"), [])
 
 
 def type_name_ja(t: str) -> str:
     return load_names().get("type_names", {}).get(t, t)
+
+
+# ---- 見た目のオス・メスの違い (カエンジシ等) ----
+
+@lru_cache(maxsize=1)
+def _gender_diff_ids():
+    return set(load_names().get("gender_diff", []))
+
+
+def has_gender_diff(species_ja: str) -> bool:
+    """見た目にオス・メスの違いがある種族か (カエンジシ・ガブリアス・カバルドン等)"""
+    en = _ja_to_en().get(normalize(species_ja or ""))
+    return bool(en) and load_names()["species_id"].get(en) in _gender_diff_ids()
+
+
+def with_gender(key: str, species_ja: str, gender, usage_db=None) -> str:
+    """性別を反映した識別子。データがオス・メスで別 (イエッサン等) ならそのデータのキー、
+    見た目だけ違う (カエンジシ等) ならメスのとき "<キー>#F" (画像をメスの姿にする)。"""
+    if not gender:
+        return key
+    gk = gender_variant(species_ja, gender, usage_db)
+    if gk:
+        return gk
+    if gender == "F" and has_gender_diff(species_ja) and not key.endswith("#F"):
+        return key + "#F"
+    return key

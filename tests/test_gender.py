@@ -59,3 +59,25 @@ class TestGender(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVisualGenderDifference(unittest.TestCase):
+    """データは同じで見た目だけオス・メスが違うポケモン (カエンジシ等)"""
+
+    def test_with_gender(self):
+        from overlay.names import has_gender_diff, resolve, with_gender
+        self.assertTrue(has_gender_diff("カエンジシ"))
+        self.assertFalse(has_gender_diff("グレンアルマ"))
+        self.assertEqual(with_gender("Pyroar", "カエンジシ", "F"), "Pyroar#F")
+        self.assertEqual(with_gender("Pyroar", "カエンジシ", "M"), "Pyroar")     # オスは通常の画像
+        self.assertEqual(with_gender("Armarouge", "グレンアルマ", "F"), "Armarouge")  # 見た目に違いが無い
+        r = resolve("Pyroar#F")
+        self.assertEqual((r["sprite"], r["display"], r["species"]), ("668f", "カエンジシ(♀)", "カエンジシ"))
+
+    def test_usage_and_stats_shared(self):
+        st = State(usage())
+        st.set_party("opp", ["カエンジシ#F"])
+        st.set_slot("opp1", ident="カエンジシ#F", side="opp", specific=True)
+        snap = st.snapshot([{"id": "opp1", "side": "opp"}])
+        self.assertEqual(snap["slots"][0]["stats"], [86, 68, 72, 109, 66, 106])  # 種族値は共通
+        self.assertEqual(snap["parties"]["opp"][0]["sprite"], "668f")             # 画像はメスの姿

@@ -17,7 +17,7 @@ from .icons import ICON_DIR, IconDB, crop_with_margin
 from .gender import crop as crop_rect
 from .gender import detect_gender
 from .names import (NameMatcher, base_stats, form_abilities_ja, gender_variant, is_mega, mega_forms, normalize,
-                    resolve, type_name_ja, types_of)
+                    resolve, type_name_ja, types_of, with_gender)
 from .nicknames import NicknameDB, clean_nick, looks_like_name, nick_key
 from .ocr import create_ocr, preprocess
 
@@ -467,7 +467,7 @@ class Recognizer(threading.Thread):
             self.state.debug[f"icon{i}"] = {"match": key, "score": round(score, 3)}
             if key and score >= thr and pv.get("opp_gender_first"):
                 g = detect_gender(crop_rect(frame, _lerp(pv["opp_gender_first"], pv["opp_gender_last"], i, n)))
-                key = gender_variant(resolve(key, self.state.usage)["species"], g, self.state.usage) or key
+                key = with_gender(key, resolve(key, self.state.usage)["species"], g, self.state.usage)
             if key and score >= thr:
                 self.preview_opp[i] = key
                 self.state.icon_guess.pop(uid, None)
@@ -503,13 +503,13 @@ class Recognizer(threading.Thread):
                     nick = self.state.nicknames.match(text)  # 登録済みのニックネーム
                     if nick:
                         nsp = resolve(nick, self.state.usage)["species"]
-                        self.preview_my[i] = gender_variant(nsp, g, self.state.usage) or nick
+                        self.preview_my[i] = with_gender(nick.split("#")[0], nsp, g, self.state.usage)
                         continue
                     if looks_like_name(text):
                         # 未登録のニックネーム → 名前の右の絵を Champions の画像と比べる。はっきり分かれば自動で登録
                         guess, cands = self.my_icon_guess(frame, pv, i, n)
                         if guess:
-                            key = gender_variant(resolve(guess, self.state.usage)["species"], g, self.state.usage) or guess
+                            key = with_gender(guess, resolve(guess, self.state.usage)["species"], g, self.state.usage)
                             self.state.nicknames.set(text, key, auto=True)
                             self.preview_my[i] = key
                             log.info("ニックネーム「%s」を絵から %s と判定して登録", clean_nick(text),
@@ -519,7 +519,7 @@ class Recognizer(threading.Thread):
                         self.state.add_unknown_nick(text, "me", cands)
                         continue
                 if sp:
-                    sp = gender_variant(sp, g, self.state.usage) or sp
+                    sp = with_gender(sp, sp, g, self.state.usage)
                 self.preview_my[i] = sp
             mine = [m for m in self.preview_my if m]
             if len(mine) >= n - 2 and mine != self.state.parties["me"]:
@@ -635,7 +635,7 @@ class Recognizer(threading.Thread):
         g = (detect_gender(crop_rect(frame, _lerp(pv["opp_gender_first"], pv["opp_gender_last"], i, n)))
              if frame is not None and pv.get("opp_gender_first") else None)
         if guess:
-            guess = gender_variant(resolve(guess, usage)["species"], g, usage) or guess
+            guess = with_gender(guess, resolve(guess, usage)["species"], g, usage)
         self.state.icon_guess[uid] = {"types": types or [], "cands": cands, "guess": guess, "by": by}
         log.info("相手%d: %s → 候補 %s%s", i + 1,
                  "タイプ " + "/".join(type_name_ja(t) for t in types) if types else "見た目",
@@ -698,10 +698,9 @@ class Recognizer(threading.Thread):
             if count >= need:
                 # 性別でデータが違うポケモン (イエッサン等) は、名前の横の ♀/♂ でどちらか決める
                 gender = detect_gender(crop_rect(frame, r["gender"])) if r.get("gender") else None
-                gkey = gender_variant(species, gender, self.state.usage)
-                if hint and not gkey and resolve(hint, self.state.usage).get("has_data"):
-                    gkey = hint  # ニックネームで登録された型 (フォルム違い等) を優先
-                ident = gkey or species
+                base = hint if hint and resolve(hint, self.state.usage).get("has_data") else species
+                ident = with_gender(base.split("#")[0], species, gender, self.state.usage)  # 性別 (データ違い・見た目違い)
+                gkey = ident if ident != species else None
                 changed = current is None or current["species"] != species
                 regender = (not changed and gkey and current["ident"] != gkey and not is_mega(current["ident"]))
                 if changed or regender:
