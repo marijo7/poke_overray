@@ -241,6 +241,7 @@ class Recognizer(threading.Thread):
         self.champ = ChampionIcons()  # Champions のポケモン画像 (選出画面のアイコンの推定用)
         self.pending_nick = {}      # region id -> 未登録ニックネームを続けて読んだ回数
         self.layout_votes = {}      # 他の画面レイアウトで選出画面が読めた回数
+        self.battle_seen = False    # 前の選出画面のあと、対戦画面でポケモンを読み取ったか (= 次の選出画面は新しい対戦)
 
     def _setup(self):
         cfg = self.get_config()
@@ -314,6 +315,21 @@ class Recognizer(threading.Thread):
                 return
         self.process_battle(frame, cfg, scale)
 
+    def opp_icons_changed(self, frame, pv, n):
+        """選出画面の相手アイコンが、今の対戦で見たものと半分以上違うか (= 別の相手との対戦)。"""
+        prev = [self.state.icon_crops.get(f"b{self.battle_no}_{i}") for i in range(n)]
+        if not any(p is not None for p in prev) or not pv.get("opp_first"):
+            return False
+        from .icons import template_feature, window_features
+        diff = 0
+        for i, p in enumerate(prev):
+            if p is None:
+                continue
+            outer, _ = crop_with_margin(frame, _lerp(pv["opp_first"], pv["opp_last"], i, n))
+            if float((window_features(outer) @ template_feature(p)).max()) < 0.8:
+                diff += 1
+        return diff >= 3
+
     def try_other_layouts(self, frame, cfg, keys, scale):
         """今の設定 (例: スマホ版) では選出画面の文字が読めないとき、他の画面 (Switch 版) の位置でも読んでみる。
         2 回続けてそちらで読めたら、読み取り範囲をその画面用に切り替える。"""
@@ -339,12 +355,22 @@ class Recognizer(threading.Thread):
     def process_preview(self, frame, cfg, pv, scale):
         n = int(pv.get("count", 6))
         now = time.time()
-        if now - self.last_preview_seen > 30:  # しばらくぶりの選出画面 = 新しい対戦
-            log.info("選出画面を検出: 新しい対戦")
+        # 新しい対戦か? (どれか 1 つでも当てはまれば、表示とパーティを入れ替える)
+        reason = None
+        if now - self.last_preview_seen > 30:
+            reason = "しばらくぶりの選出画面"
+        elif self.battle_seen:
+            reason = "対戦画面のあとの選出画面"
+        elif self.opp_icons_changed(frame, pv, n):
+            reason = "相手のアイコンが前の対戦と違う"
+        if reason:
+            log.info("選出画面を検出: 新しい対戦 (%s)", reason)
             self.state.reset()
             self.pending.clear()
             self.battle_no += 1
             self.preview_opp, self.preview_my = [None] * n, [None] * n
+            self.state.status["battle"] = f"{self.battle_no} 戦目 ({reason})"
+        self.battle_seen = False
         self.last_preview_seen = now
         self.state.status["screen"] = "選出画面"
 
@@ -521,6 +547,7 @@ class Recognizer(threading.Thread):
                 self.pending.pop(r["id"], None)
                 continue
             self.pending_nick.pop(r["id"], None)
+            self.battle_seen = True  # 対戦画面でポケモンを読み取った
             prev, count = self.pending.get(r["id"], (None, 0))
             count = count + 1 if prev == species else 1
             self.pending[r["id"]] = (species, count)
