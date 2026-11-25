@@ -8,12 +8,13 @@ from PIL import Image
 class OBSCapture:
     """OBS WebSocket (v5, OBS 28 以降標準) で指定ソースのスクリーンショットを取る。"""
 
-    def __init__(self, host, port, password, source, width=1920, height=1080, **_):
+    def __init__(self, host, port, password, source, width=1920, height=1080, format="jpg", quality=90, **_):
         import obsws_python as obs  # 遅延 import
 
         self._obs = obs
         self.conn = dict(host=host, port=port, password=password, timeout=5)
         self.source, self.width, self.height = source, width, height
+        self.format, self.quality = format, quality
         self.client = None
 
     def _connect(self):
@@ -23,7 +24,7 @@ class OBSCapture:
         if self.client is None:
             self._connect()
         try:
-            resp = self.client.get_source_screenshot(self.source, "png", self.width, self.height, -1)
+            resp = self.client.get_source_screenshot(self.source, self.format, self.width, self.height, self.quality)
         except Exception:
             self.client = None  # 次回再接続
             raise

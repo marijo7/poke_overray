@@ -11,12 +11,17 @@ DEFAULT_CONFIG = {
         # obs: OBS WebSocket でソースのスクリーンショットを取得 (推奨)
         # screen: デスクトップ画面を直接キャプチャ / file: 画像ファイル (テスト用)
         "backend": "obs",
+        # format: jpg は png よりエンコード/デコードが軽い (OBS 側の負荷も下がる)
         "obs": {"host": "localhost", "port": 4455, "password": "", "source": "映像キャプチャデバイス",
-                "width": 1920, "height": 1080},
+                "width": 1920, "height": 1080, "format": "jpg", "quality": 90},
         "screen": {"monitor": 1},
         "file": {"path": ""},
     },
-    "ocr": {"backend": "windows", "lang": "ja", "scale": 2.0},
+    # backend: windows (標準・CPU) / rapidocr (GPU 対応) / tesseract
+    # device (rapidocr のみ): cpu / dml (DirectML: NVIDIA・AMD・Intel GPU) / cuda
+    # threads (rapidocr のみ): CPU 実行時のスレッド数。1 が最も CPU 使用率が低い
+    # scale を書くと OCR 前の拡大率を上書き (既定: windows・tesseract は 2、rapidocr は 1)
+    "ocr": {"backend": "windows", "lang": "ja", "device": "dml", "threads": 1},
     "interval_sec": 0.5,
     "confirm_frames": 2,
     "min_ratio": 0.72,

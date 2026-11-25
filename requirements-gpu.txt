@@ -1,0 +1,7 @@
+# RapidOCR (GPU 対応 OCR) を使う場合に追加でインストールする
+#   setup_gpu.bat を実行するか: pip install -r requirements-gpu.txt
+rapidocr>=3.4
+# DirectML: NVIDIA / AMD / Intel の GPU で動く (Windows 10 1903 以降)
+# ※ onnxruntime (CPU 版) と同時に入れると競合するため、CPU 版は入れない
+onnxruntime-directml>=1.20 ; sys_platform == "win32"
+onnxruntime>=1.20 ; sys_platform != "win32"

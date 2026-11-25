@@ -47,9 +47,10 @@ def make_handler(app: App):
             if path == "/api/state":
                 return self._json(app.state.snapshot(app.cfg["regions"]))
             if path == "/api/frame.jpg":
-                if app.state.frame_jpeg is None:
+                jpeg = app.state.frame_jpeg()
+                if jpeg is None:
                     return self._send(404, b"no frame", "text/plain")
-                return self._send(200, app.state.frame_jpeg, "image/jpeg")
+                return self._send(200, jpeg, "image/jpeg")
             if path == "/api/config":
                 return self._json({"regions": app.cfg["regions"], "usage": app.cfg["usage"]})
             if path == "/api/pokemon":

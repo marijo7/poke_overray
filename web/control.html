@@ -98,6 +98,7 @@
 <script>
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fmt = (v) => (v == null ? "-" : Math.round(v));
   const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }).then((r) => r.json());
   $("url").textContent = location.origin + "/overlay";
 
@@ -199,6 +200,8 @@
       const s = st.status, m = st.usage_meta || {};
       $("status").innerHTML = `
         <span>取得元 <b>${esc(s.capture)}</b></span><span>OCR <b>${esc(s.ocr)}</b></span><span><b>${s.fps}</b> fps</span>
+        <span title="画面取得 / 文字認識 にかかった時間 (1回あたり)">処理時間 <b>${fmt(st.perf.grab_ms)}</b> / <b>${fmt(st.perf.ocr_ms)}</b> ms</span>
+        <span title="このプログラム全体の CPU 使用率 (PC 全体に対する割合。タスクマネージャーと同じ基準)">CPU <b>${st.perf.cpu_pct ?? "-"}</b>%</span>
         <span>データ <b>${m.format ? esc(m.format + " " + (m.data_date || "")) : "なし"}</b></span>
         ${s.paused ? '<span class="err">一時停止中</span>' : ""}${s.error ? `<span class="err">エラー: ${esc(s.error)}</span>` : ""}`;
       $("pause").dataset.p = s.paused ? "1" : "0";

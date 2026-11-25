@@ -1,6 +1,7 @@
 """画面を定期的に取得し、各領域の OCR → ポケモン名特定 → 状態更新を行う。"""
 import io
 import logging
+import os
 import threading
 import time
 
@@ -21,8 +22,21 @@ class State:
         self.history = []      # この対戦で見た相手 (usage key または種族名)
         self.debug = {}        # region id -> {"text", "match", "score"}
         self.status = {"capture": "未接続", "ocr": "-", "error": None, "fps": 0.0, "paused": False}
-        self.frame_jpeg = None
+        # 負荷: 取得/OCR にかかった時間 (ms, 移動平均) と、このプログラム全体の CPU 使用率 (PC 全体に対する %)
+        self.perf = {"grab_ms": None, "ocr_ms": None, "cpu_pct": None}
+        self.frame = None
         self.version = 0
+
+    def frame_jpeg(self):
+        """設定画面のプレビュー用。要求されたときだけ JPEG 化する (配信中の無駄な負荷を避ける)。"""
+        frame = self.frame
+        if frame is None:
+            return None
+        thumb = frame.copy()
+        thumb.thumbnail((1280, 720))
+        buf = io.BytesIO()
+        thumb.save(buf, "JPEG", quality=80)
+        return buf.getvalue()
 
     def set_slot(self, region_id, species=None, key=None, source="auto"):
         with self.lock:
@@ -64,7 +78,7 @@ class State:
                 e = self.usage.get(ident)
                 history.append({"key": ident, "display": e["display"] if e else ident, "has_data": bool(e)})
             return {"version": self.version, "slots": slots, "history": history,
-                    "status": dict(self.status), "usage_meta": self.usage.meta}
+                    "status": dict(self.status), "perf": dict(self.perf), "usage_meta": self.usage.meta}
 
 
 class Recognizer(threading.Thread):
@@ -96,30 +110,38 @@ class Recognizer(threading.Thread):
 
     def _loop(self):
         last = time.time()
+        cpu_wall, cpu_proc = time.perf_counter(), time.process_time()
+        ncpu = os.cpu_count() or 1
+        perf = self.state.perf
         while not self.stop_event.is_set() and not self.reload_event.is_set():
             cfg = self.get_config()
             if self.state.status.get("paused"):
                 self.stop_event.wait(0.5)
                 continue
+            t0 = time.perf_counter()
             frame = self.capture.grab()
+            t1 = time.perf_counter()
             self.state.status["error"] = None
             self.process_frame(frame, cfg)
+            t2 = time.perf_counter()
+            self.state.frame = frame
 
-            buf = io.BytesIO()
-            thumb = frame.copy()
-            thumb.thumbnail((1280, 720))
-            thumb.save(buf, "JPEG", quality=80)
-            self.state.frame_jpeg = buf.getvalue()
+            perf["grab_ms"] = _ema(perf["grab_ms"], (t1 - t0) * 1000)
+            perf["ocr_ms"] = _ema(perf["ocr_ms"], (t2 - t1) * 1000)
+            if t2 - cpu_wall >= 2.0:  # 2 秒ごとに CPU 使用率を更新
+                pt = time.process_time()
+                perf["cpu_pct"] = round((pt - cpu_proc) / (t2 - cpu_wall) / ncpu * 100, 1)
+                cpu_wall, cpu_proc = t2, pt
 
             now = time.time()
             self.state.status["fps"] = round(1 / max(now - last, 1e-3), 1)
             last = now
-            self.stop_event.wait(max(0.0, cfg.get("interval_sec", 0.5) - (time.time() - now)))
+            self.stop_event.wait(max(0.0, cfg.get("interval_sec", 0.5) - (t2 - t0)))
 
     def process_frame(self, frame, cfg):
         W, H = frame.size
         need = max(1, int(cfg.get("confirm_frames", 2)))
-        scale = cfg["ocr"].get("scale", 2.0)
+        scale = cfg["ocr"].get("scale", getattr(self.ocr, "default_scale", 2.0))
         for r in cfg["regions"]:
             box = (int(r["x"] * W), int(r["y"] * H), int((r["x"] + r["w"]) * W), int((r["y"] + r["h"]) * H))
             if box[2] - box[0] < 4 or box[3] - box[1] < 4:
@@ -142,3 +164,7 @@ class Recognizer(threading.Thread):
             if count >= need and (current is None or current["species"] != species):
                 log.info("%s: %s (%.2f) ← %r", r["id"], species, score, text)
                 self.state.set_slot(r["id"], species=species, source="auto")
+
+
+def _ema(prev, value, k=0.2):
+    return round(value if prev is None else prev * (1 - k) + value * k, 1)

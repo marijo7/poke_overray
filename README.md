@@ -87,6 +87,34 @@ URL パラメータで表示を変えられます（`?` の後に `&` でつな�
 - 誤認識したときは設定画面の「手動で選ぶ」に名前を入れて切り替え
 - 対戦が終わったら「対戦リセット」で表示と履歴をクリア
 
+## 負荷の確認と GPU の利用
+
+設定画面の上部に、負荷が表示されます。
+
+| 表示 | 意味 |
+|---|---|
+| 処理時間 `取得 / 認識` ms | 画面取得と文字認識に 1 回あたりかかった時間 |
+| CPU % | このプログラム全体の CPU 使用率（PC 全体に対する割合。タスクマネージャーと同じ基準） |
+
+読み取りは 0.5 秒に 1 回、名前の部分の小さい画像を読むだけなので、通常は CPU のままで問題ありません。
+**CPU が数 % を超えて配信に影響しているとき**は、GPU で動く RapidOCR に切り替えられます。
+
+1. `setup_gpu.bat` を実行（RapidOCR と ONNX Runtime DirectML をインストール。NVIDIA / AMD / Intel の GPU に対応）
+2. `config.json` の `ocr` を次のように変更して `start.bat` を再起動
+
+   ```json
+   "ocr": {"backend": "rapidocr", "device": "dml"},
+   ```
+
+3. 設定画面の OCR 欄が `RapidOCR (GPU: DirectML)` になっていれば GPU で動いています。
+   `RapidOCR (CPU)` と出る場合は GPU が使えず CPU で動いています
+
+RapidOCR は CPU でも動きます（`"device": "cpu"`）。Windows 標準 OCR で読み取りが不安定な場合の代替にもなります。
+NVIDIA の GPU で CUDA を使う場合は `onnxruntime-gpu` と CUDA / cuDNN を入れて `"device": "cuda"` にします（通常は DirectML で十分です）。
+
+> 参考（開発環境の 4 コア CPU・2 体分を 0.5 秒ごとに読み取り）: RapidOCR の CPU 実行で 1 回約 40ms、CPU 使用率 約 2%。
+> GPU に回すとこの分の CPU は空きますが、画像が小さいため処理時間自体はあまり変わりません。
+
 ## 採用率データの更新
 
 採用率は [Pikalytics](https://www.pikalytics.com/) が公開しているデータ（使用率上位 50 匹）を取得し、
@@ -111,8 +139,11 @@ URL パラメータで表示を変えられます（`?` の後に `&` でつな�
 | キー | 既定値 | 説明 |
 |---|---|---|
 | `capture.backend` | `obs` | `obs`（推奨）/ `screen`（デスクトップ直接）/ `file`（画像ファイル・テスト用） |
-| `ocr.backend` | `windows` | `windows` / `tesseract` |
-| `ocr.scale` | `2.0` | OCR 前の拡大率。小さい文字が読めないときは 3 に |
+| `capture.obs.format` | `jpg` | OBS から受け取る画像形式。`jpg` は `png` より軽い |
+| `ocr.backend` | `windows` | `windows`（標準）/ `rapidocr`（GPU 対応）/ `tesseract` |
+| `ocr.device` | `dml` | RapidOCR の実行先: `cpu` / `dml`（GPU）/ `cuda` |
+| `ocr.threads` | `1` | RapidOCR を CPU で動かすときのスレッド数（1 が最も低負荷） |
+| `ocr.scale` | 自動 | OCR 前の拡大率（Windows OCR は 2、RapidOCR は 1）。小さい文字が読めないときに調整 |
 | `interval_sec` | `0.5` | 読み取り間隔（秒） |
 | `confirm_frames` | `2` | 同じ名前を何回連続で読んだら切り替えるか |
 | `min_ratio` | `0.72` | あいまい一致の閾値。誤認識が多ければ上げる |
@@ -140,7 +171,7 @@ URL パラメータで表示を変えられます（`?` の後に `&` でつな�
 ```
 main.py               起動スクリプト
 overlay/capture.py    画面取得 (OBS / screen / file)
-overlay/ocr.py        OCR (Windows.Media.Ocr / Tesseract)
+overlay/ocr.py        OCR (Windows.Media.Ocr / RapidOCR / Tesseract)
 overlay/names.py      日本語名辞書・あいまい一致・Showdown 名 → 日本語
 overlay/recognizer.py 認識ループと共有状態
 overlay/server.py     HTTP サーバー (/overlay, /control, /api/*)
