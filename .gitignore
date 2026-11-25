@@ -9,3 +9,5 @@ data/usage.json
 data/sprites/
 # 登録した選出画面アイコン (各自の環境で学習)
 data/icons/
+# 対戦中の顔画像 (メガシンカ判定用に各自の環境で学習)
+data/portraits/

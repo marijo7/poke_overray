@@ -100,15 +100,20 @@ class IconDB:
         p = self.dir / f"{iid}.png"
         return p if p.exists() else None
 
-    def match(self, outer: Image.Image):
-        """戻り値: (key, スコア 0〜1)。登録が無ければ (None, 0)。"""
+    def match(self, outer: Image.Image, keys=None):
+        """戻り値: (key, スコア 0〜1)。keys を渡すとその中だけで照合。登録が無ければ (None, 0)。"""
         with self.lock:
-            if not self.items:
+            idx = [i for i, it in enumerate(self.items) if keys is None or it["key"] in keys]
+            if not idx:
                 return None, 0.0
-            scores = window_features(outer) @ self.features.T  # (窓数, 登録数)
+            scores = window_features(outer) @ self.features[idx].T  # (窓数, 候補数)
             best = scores.max(axis=0)
-            i = int(best.argmax())
-            return self.items[i]["key"], float(best[i])
+            j = int(best.argmax())
+            return self.items[idx[j]]["key"], float(best[j])
+
+    def has_key(self, key) -> bool:
+        with self.lock:
+            return any(it["key"] == key for it in self.items)
 
     def list(self):
         with self.lock:

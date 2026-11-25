@@ -71,6 +71,13 @@ def make_handler(app: App):
             n = int(self.headers.get("Content-Length") or 0)
             return json.loads(self.rfile.read(n) or b"{}")
 
+        def _icon_dbs(self):
+            """選出画面のアイコン / 対戦中の顔画像 (メガシンカ判定用)"""
+            dbs = [("preview", app.state.icons)]
+            if app.recognizer is not None:
+                dbs.append(("portrait", app.recognizer.portraits))
+            return dbs
+
         def do_GET(self):
             path = urlparse(self.path).path
             if path in ("/", "/overlay"):
@@ -100,9 +107,12 @@ def make_handler(app: App):
                 return self._json(out)
             if path == "/api/icons":
                 from .names import resolve
-                return self._json([{"id": it["id"], "key": it["key"],
-                                    "display": (resolve(it["key"], app.usage) or {}).get("display", it["key"])}
-                                   for it in app.state.icons.list()])
+                out = []
+                for kind, db in self._icon_dbs():
+                    out += [{"id": it["id"], "key": it["key"], "kind": kind,
+                             "display": (resolve(it["key"], app.usage) or {}).get("display", it["key"])}
+                            for it in db.list()]
+                return self._json(out)
             m = re.fullmatch(r"/api/icon/([A-Za-z0-9_]+)\.png", path)
             if m:  # 選出画面で切り出したアイコン / 登録済みアイコン
                 uid = m.group(1)
@@ -111,9 +121,10 @@ def make_handler(app: App):
                     buf = io.BytesIO()
                     crop.save(buf, "PNG")
                     return self._send(200, buf.getvalue(), "image/png")
-                f = app.state.icons.image_path(uid)
-                if f:
-                    return self._send(200, f.read_bytes(), "image/png")
+                for _, db in self._icon_dbs():
+                    f = db.image_path(uid)
+                    if f:
+                        return self._send(200, f.read_bytes(), "image/png")
                 return self._send(404, b"no icon", "text/plain")
             m = re.fullmatch(r"/sprite/(\d+)\.png", path)
             if m:
@@ -157,9 +168,12 @@ def make_handler(app: App):
                         cur["enabled"] = bool(pv["enabled"])
                 clean = []
                 for r in regions:
-                    clean.append({"id": str(r["id"]), "label": str(r.get("label", r["id"])),
-                                  "side": "me" if r.get("side") == "me" else "opp",
-                                  **{k: min(1.0, max(0.0, float(r[k]))) for k in ("x", "y", "w", "h")}})
+                    item = {"id": str(r["id"]), "label": str(r.get("label", r["id"])),
+                            "side": "me" if r.get("side") == "me" else "opp",
+                            **{k: min(1.0, max(0.0, float(r[k]))) for k in ("x", "y", "w", "h")}}
+                    if isinstance(r.get("portrait"), dict):
+                        item["portrait"] = {k: min(1.0, max(0.0, float(r["portrait"][k]))) for k in ("x", "y", "w", "h")}
+                    clean.append(item)
                 app.cfg["regions"] = clean
                 save_config(app.cfg)
                 return self._json({"ok": True, "regions": clean, "preview": app.cfg.get("preview")})
@@ -167,6 +181,8 @@ def make_handler(app: App):
                 region = next((r for r in app.cfg["regions"] if r["id"] == body.get("id")), {})
                 app.state.set_slot(body.get("id"), ident=body.get("ident"), side=region.get("side", "opp"),
                                    source="manual")
+                if body.get("ident") and app.recognizer is not None:
+                    app.recognizer.learn_portrait(body.get("id"), app.state.slots[body["id"]]["ident"])
                 return self._json({"ok": True})
             if path == "/api/party":
                 side = body.get("side")
@@ -183,7 +199,7 @@ def make_handler(app: App):
                 key = app.state.label_icon(str(body.get("uid", "")), str(body.get("name", "")).strip())
                 return self._json({"ok": bool(key), "key": key})
             if path == "/api/icon_delete":
-                return self._json({"ok": app.state.icons.remove(str(body.get("id", "")))})
+                return self._json({"ok": any(db.remove(str(body.get("id", ""))) for _, db in self._icon_dbs())})
             if path == "/api/reset":
                 app.state.reset()
                 return self._json({"ok": True})

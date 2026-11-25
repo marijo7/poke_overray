@@ -59,6 +59,8 @@
   .row-item .fill { position: absolute; inset: 0 auto 0 0; background: var(--bar); opacity: 0.45; border-radius: 4px; }
   .row-item span { position: relative; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .row-item .pct { font-variant-numeric: tabular-nums; margin-left: 8px; flex: none; }
+  .mega { font-size: 12px; color: var(--accent); margin: 4px 0 0; }
+  .mega b { font-weight: 800; }
   .nodata { font-size: 13px; color: var(--sub); padding: 4px 0; }
   .credit { font-size: 9px; color: var(--sub); margin-top: 6px; text-align: right; }
   #history { display: none; gap: 6px; flex-wrap: wrap; padding: 0 8px 8px; }
@@ -102,12 +104,18 @@
         <div class="nodata">採用率データがありません</div></div>`;
     }
     const rank = p.rank ? `使用率 ${p.rank}位${p.usage != null ? ` (${p.usage.toFixed(1)}%)` : ""}` : "";
+    // メガシンカ前: メガストーンの採用率 / メガシンカ後: 特性はメガシンカ後のものに確定
+    const megaLine = slot.mega ? `<div class="mega"><b>メガシンカ済み</b></div>`
+      : (p.mega && p.mega.length ? `<div class="mega">メガシンカ率 <b>${p.mega.reduce((a, m) => a + m.pct, 0).toFixed(0)}%</b>
+          ${p.mega.length > 1 ? "(" + p.mega.map((m) => esc(m.display.replace(/^メガ/, "")) + " " + m.pct.toFixed(0) + "%").join(" / ") + ")" : ""}</div>` : "");
+    const abilities = slot.mega && slot.form_abilities.length ? slot.form_abilities.map((n) => ({ name: n, pct: 100 })) : p.abilities;
     const credit = meta && meta.source ? `データ: ${esc(meta.source)} ${esc(meta.format || "")} ${esc(meta.data_date || "")}` : "";
     return `<div class="card">
-      <div class="head">${img(slot)}<div class="title"><div class="name">${esc(p.display)}</div><div class="rank">${rank}</div></div></div>
+      <div class="head">${img(slot)}<div class="title"><div class="name">${esc(slot.display || p.display)}</div><div class="rank">${rank}</div></div></div>
+      ${megaLine}
       ${section("技", p.moves, opt.moves)}
       ${section("持ち物", p.items, opt.items)}
-      ${section("特性", p.abilities, opt.abilities)}
+      ${section(slot.mega ? "特性 (メガシンカ後)" : "特性", abilities, opt.abilities)}
       <div class="credit">${credit}</div></div>`;
   }
 
@@ -116,7 +124,7 @@
     try {
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
       const slots = st.slots.filter((s) => s.species && (opt.slots ? opt.slots.includes(s.id) : s.side === "opp"));
-      const sig = JSON.stringify([slots.map((s) => [s.id, s.display, s.sprite, s.pokemon && s.pokemon.key]), st.history, st.usage_meta]);
+      const sig = JSON.stringify([slots.map((s) => [s.id, s.display, s.sprite, s.mega, s.pokemon && s.pokemon.key]), st.history, st.usage_meta]);
       if (sig !== lastSig) {
         lastSig = sig;
         document.getElementById("cards").innerHTML = slots.map((s) => card(s, st.usage_meta)).join("");

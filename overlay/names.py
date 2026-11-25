@@ -247,3 +247,43 @@ def all_names_ja():
     species = [ja for en, ja in sorted(names["pokemon"].items(), key=lambda kv: names["species_id"].get(kv[0], 9999))]
     forms = sorted(showdown_to_ja(sd)[0] for sd in ja_form_index().values())
     return species + forms
+
+
+# ---- メガシンカ ----
+
+@lru_cache(maxsize=None)
+def mega_forms(species_ja: str):
+    """種族 (日本語名) のメガシンカ後フォルム (Showdown 形式) の一覧。例: リザードン → [Charizard-Mega-X, Charizard-Mega-Y]"""
+    out = []
+    for ident in load_names()["forms"]:
+        if "-mega" not in ident:
+            continue
+        sd = "-".join(w.capitalize() for w in ident.split("-"))
+        base, form = split_showdown_name(sd)
+        if form and form[0] == "Mega" and species_ja == species_ja_of(base):
+            out.append(sd)
+    return sorted(out)
+
+
+def species_ja_of(en_species: str) -> str:
+    return load_names()["pokemon"].get(en_species, en_species)
+
+
+def is_mega(key: str) -> bool:
+    return bool(key) and "-Mega" in key
+
+
+def mega_form_for_stone(species_ja: str, stone_en: str):
+    """メガストーン → メガシンカ後のフォルム。例: Charizardite Y → Charizard-Mega-Y"""
+    forms = mega_forms(species_ja)
+    suffix = stone_en.rsplit(" ", 1)[-1] if stone_en[-2:-1] == " " else ""
+    for f in forms:
+        if (suffix and f.endswith("-Mega-" + suffix)) or (not suffix and f.endswith("-Mega")):
+            return f
+    return forms[0] if forms else None
+
+
+def form_abilities_ja(key: str):
+    """メガシンカ後フォルムの特性 (日本語)。該当しなければ空。"""
+    ab = load_names().get("form_abilities", {}).get(_identifier(key), [])
+    return [translate("abilities", a) for a in ab]

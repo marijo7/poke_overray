@@ -7,8 +7,8 @@ import time
 
 from .capture import create_capture
 from .config import save_config
-from .icons import crop_with_margin
-from .names import NameMatcher, normalize, resolve
+from .icons import ICON_DIR, IconDB, crop_with_margin
+from .names import NameMatcher, form_abilities_ja, is_mega, mega_forms, normalize, resolve
 from .ocr import create_ocr, preprocess
 
 log = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ class State:
         self.slots = {}        # region id -> {"ident", "species", "side", "source", "updated"}
         # パーティ (識別子 = 採用率データのキー or 日本語名)。自分は config に保存、相手は対戦ごとにリセット
         self.parties = {"me": list(my_party or [])[: self.PARTY_SIZE], "opp": []}
+        self.base_my = list(self.parties["me"])  # メガシンカ表示を戻すための元の自分パーティ
         self.debug = {}        # region id -> {"text", "match", "score"}
         self.status = {"capture": "未接続", "ocr": "-", "error": None, "fps": 0.0, "paused": False}
         # 負荷: 取得/OCR にかかった時間 (ms, 移動平均) と、このプログラム全体の CPU 使用率 (PC 全体に対する %)
@@ -92,12 +93,28 @@ class State:
     def set_party(self, side, members):
         with self.lock:
             self.parties[side] = [m for m in members if m][: self.PARTY_SIZE * 2]
+            if side == "me":
+                self.base_my = list(self.parties["me"])
+            self.version += 1
+
+    def set_form(self, region_id, form_key):
+        """メガシンカ等で場のポケモンの姿が変わった。スロットとパーティの表示を差し替える。"""
+        with self.lock:
+            slot = self.slots.get(region_id)
+            if not slot or slot["ident"] == form_key:
+                return
+            slot["ident"] = form_key
+            party = self.parties[slot["side"]]
+            for i, m in enumerate(party):
+                if self._resolve(m)["species"] == slot["species"]:
+                    party[i] = form_key
             self.version += 1
 
     def reset(self):
         with self.lock:
             self.slots.clear()
             self.parties["opp"].clear()
+            self.parties["me"] = list(self.base_my)  # メガシンカ表示を元に戻す
             self.icon_crops.clear()
             self.version += 1
 
@@ -113,7 +130,10 @@ class State:
                     "display": info["display"] if info else None,
                     "sprite": info["sprite"] if info else None,
                     "source": s["source"] if s else None,
-                    "pokemon": self.usage.get(info["key"]) if info else None,
+                    # メガシンカ後も採用率は元のポケモンのデータ (メガストーンの持ち物として集計されている)
+                    "pokemon": (self.usage.get(info["key"]) or self.usage.find_by_species(info["species"])) if info else None,
+                    "mega": is_mega(info["key"]) if info else False,
+                    "form_abilities": form_abilities_ja(info["key"]) if info and is_mega(info["key"]) else [],
                     "debug": self.debug.get(r["id"]),
                 })
             parties = {}
@@ -137,6 +157,9 @@ class Recognizer(threading.Thread):
         self.last_preview_seen = 0.0
         self.battle_no = 0
         self.preview_opp, self.preview_my = [], []
+        # 体力バー横の顔画像 (メガシンカ判定用)。種族ごとに「通常」と「メガシンカ後」の見た目を覚える
+        self.portraits = IconDB(ICON_DIR.parent / "portraits")
+        self.portrait_pending = {}  # region id -> (候補フォルム, 連続回数)
 
     def _setup(self):
         cfg = self.get_config()
@@ -277,6 +300,71 @@ class Recognizer(threading.Thread):
             if count >= need and (current is None or current["species"] != species):
                 log.info("%s: %s (%.2f) ← %r", r["id"], species, score, text)
                 self.state.set_slot(r["id"], ident=species, side=r.get("side", "opp"), source="auto")
+            if r.get("portrait"):
+                self.check_mega(frame, r, cfg)
+
+    def check_mega(self, frame, r, cfg):
+        """顔画像が、そのポケモンの「通常」の見た目から変わったらメガシンカと判断する。
+
+        - 初めて場に出た種族の顔画像を「通常」として覚える (メガシンカは場に出た後なので最初は通常の姿)
+        - 覚えた見た目と違う状態が数フレーム続き、その種族にメガシンカがあればメガシンカと判断
+        - メガシンカ先が複数 (リザードン X/Y 等) なら、覚えたメガの見た目 → 無ければメガストーン採用率が高い方
+        """
+        slot = self.state.slots.get(r["id"])
+        if not slot or not slot.get("species"):
+            return
+        species = slot["species"]
+        forms = mega_forms(species)
+        if not forms:
+            return  # メガシンカしないポケモンは判定不要 (負荷もかけない)
+        if is_mega(slot["ident"]):
+            return  # メガシンカは戻らない
+        outer, inner = crop_with_margin(frame, r["portrait"])
+        thr = float(cfg.get("preview", {}).get("icon_threshold", 0.8))
+        key, score = self.portraits.match(outer, keys={species, *forms})
+        if not self.portraits.has_key(species):
+            # 「通常」の見た目を覚えるのは、選出画面から見ている対戦で、場に出た直後だけ
+            # (途中から起動した場合、すでにメガシンカ後の姿を通常と誤って覚えてしまうため)
+            just_entered = time.time() - slot["updated"] < 5
+            watched = time.time() - self.last_preview_seen < 20 * 60
+            if just_entered and watched and (key is None or score < float(cfg.get("preview", {}).get("icon_threshold", 0.8))):
+                self.portraits.add(inner, species)
+                log.info("顔画像を記憶: %s (通常)", species)
+            if key is None:
+                return
+        self.state.debug.setdefault(r["id"], {})["portrait"] = {"match": key, "score": round(score, 3)}
+        if score >= thr:
+            cand = key if key != species else None
+        else:
+            cand = self._guess_mega(species, forms)  # 未知の見た目 = まだ覚えていないメガシンカ後の姿
+        prev, n = self.portrait_pending.get(r["id"], (None, 0))
+        n = n + 1 if cand == prev else 1
+        self.portrait_pending[r["id"]] = (cand, n)
+        if cand and n >= 3:
+            log.info("%s: メガシンカを検出 → %s (一致度 %.2f)", r["id"], cand, score)
+            if score < thr and len(forms) == 1:
+                self.portraits.add(inner, cand)  # メガシンカ先が 1 つなら確実なので見た目を覚える
+            self.state.set_form(r["id"], cand)
+
+    def learn_portrait(self, region_id, key):
+        """手動でフォルムを選んだとき、そのときの顔画像をそのフォルムの見た目として覚える。"""
+        r = next((x for x in self.get_config()["regions"] if x["id"] == region_id), None)
+        frame = self.state.frame
+        info = resolve(key, self.state.usage) if key else None
+        if not r or not r.get("portrait") or frame is None or not info or not mega_forms(info["species"]):
+            return False
+        label = info["key"] if is_mega(info["key"]) else info["species"]
+        _, inner = crop_with_margin(frame, r["portrait"])
+        self.portraits.add(inner, label)
+        log.info("顔画像を記憶 (手動): %s", label)
+        return True
+
+    def _guess_mega(self, species, forms):
+        if len(forms) == 1:
+            return forms[0]
+        entry = self.state.usage.find_by_species(species)
+        megas = (entry or {}).get("mega") or []
+        return max(megas, key=lambda m: m["pct"])["key"] if megas else forms[0]
 
 
 def _ema(prev, value, k=0.2):

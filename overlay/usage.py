@@ -3,6 +3,8 @@ import json
 import threading
 from pathlib import Path
 
+from .names import load_names, mega_form_for_stone, showdown_to_ja
+
 USAGE_PATH = Path(__file__).resolve().parent.parent / "data" / "usage.json"
 
 
@@ -22,6 +24,16 @@ class UsageDB:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             self.meta = data.get("meta", {})
             self.entries = {e["key"]: e for e in data.get("pokemon", [])}
+            stones = set(load_names().get("mega_stones", []))
+            for e in self.entries.values():
+                # 持ち物のメガストーン → メガシンカ率 (どのメガシンカか別)
+                megas = []
+                for it in e.get("items", []):
+                    if it.get("en") in stones:
+                        form = mega_form_for_stone(e["species"], it["en"])
+                        if form:
+                            megas.append({"key": form, "display": showdown_to_ja(form)[0], "pct": it["pct"]})
+                e["mega"] = megas
             return True
 
     def get(self, key):

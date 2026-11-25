@@ -69,7 +69,7 @@
     <div class="panel">
       <h2>読み取り範囲</h2>
       <div id="stage"><img id="frame" alt=""><div class="noframe" id="noframe">画面を取得できていません</div></div>
-      <p class="hint">右の一覧で領域を選び、画像上をドラッグすると範囲を設定できます。相手ポケモンの<b>名前の文字だけ</b>が入るように、少し余白をつけて囲むのがコツです。調整したら「保存」を押してください。</p>
+      <p class="hint">下の一覧で領域を選び、画像上をドラッグすると範囲を設定できます。「名前」は<b>名前の文字だけ</b>が入るように、「顔」は名前の左の小さなポケモンの絵を囲みます（メガシンカの判定に使用）。調整したら「保存」を押してください。</p>
     </div>
     <div class="panel">
       <h2>領域一覧 (対戦中の名前)</h2>
@@ -113,7 +113,7 @@
     <div class="panel">
       <h2>登録済みアイコン <span class="hint" id="iconcount"></span></h2>
       <div class="chips" id="iconlist"></div>
-      <p class="hint">間違えて登録したものは × で削除できます。</p>
+      <p class="hint">「顔」は対戦中の名前の横の画像で、メガシンカの判定に使います。間違えて登録したものは × で削除できます。</p>
     </div>
     <div class="panel">
       <h2>OBS への追加</h2>
@@ -141,7 +141,16 @@
   let dirty = false;
   const PV_ITEMS = [["marker", "マーカー"], ["opp_first", "相手アイコン 1匹目"], ["opp_last", "相手アイコン 6匹目"],
                     ["my_first", "自分の名前 1匹目"], ["my_last", "自分の名前 6匹目"]];
-  const selRect = () => selected.startsWith("p:") ? (preview && preview[selected.slice(2)]) : regions[+selected.slice(1)];
+  const selRect = () => {
+    if (selected.startsWith("p:")) return preview && preview[selected.slice(2)];
+    const r = regions[+selected.slice(1)];
+    if (!r) return null;
+    if (selected[0] === "q") {  // 顔画像の範囲 (無ければ名前の左に作る)
+      r.portrait = r.portrait || { x: Math.max(0, r.x - r.h * 1.2), y: r.y, w: r.h * 1.0, h: r.h * 2 };
+      return r.portrait;
+    }
+    return r;
+  };
   const lerp = (a, b, t) => Object.fromEntries(["x", "y", "w", "h"].map((k) => [k, a[k] + (b[k] - a[k]) * t]));
   function addRect(r, cls, label) {
     const d = document.createElement("div");
@@ -155,7 +164,8 @@
   function renderRegions() {
     $("regions").innerHTML = regions.map((r, i) => `
       <tr>
-        <td><input type="radio" name="sel" ${"r" + i === selected ? "checked" : ""} data-sel="r${i}"></td>
+        <td><label title="名前の範囲を編集"><input type="radio" name="sel" ${"r" + i === selected ? "checked" : ""} data-sel="r${i}">名前</label>
+            <label title="顔画像の範囲を編集 (メガシンカの判定に使う)"><input type="radio" name="sel" ${"q" + i === selected ? "checked" : ""} data-sel="q${i}">顔</label></td>
         <td><input type="text" value="${esc(r.id)}" data-i="${i}" data-k="id" title="ID (URL の slot= に使う)"></td>
         <td><input type="text" value="${esc(r.label)}" data-i="${i}" data-k="label" title="表示名"></td>
         <td><select data-i="${i}" data-k="side" title="どちらのポケモン名か">
@@ -165,7 +175,10 @@
       </tr>`).join("");
     $("stage").querySelectorAll(".rect").forEach((e) => e.remove());
     const pvSel = selected.startsWith("p:");
-    if (!pvSel) regions.forEach((r, i) => addRect(r, "r" + i === selected ? "sel" : "", r.label || r.id));
+    if (!pvSel) regions.forEach((r, i) => {
+      addRect(r, "r" + i === selected ? "sel" : "", r.label || r.id);
+      if (r.portrait) addRect(r.portrait, "pv" + ("q" + i === selected ? " sel" : " ghost"), "q" + i === selected ? "顔" : "");
+    });
     if (preview) {
       $("pvon").checked = !!preview.enabled;
       $("pvregions").innerHTML = PV_ITEMS.map(([k, label]) => `
@@ -228,7 +241,8 @@
       return `<div class="slot" data-id="${esc(s.id)}">
         <div><span class="hint">${esc(s.label)}</span></div>
         <div class="now">${esc(name)}${src}</div>
-        <div class="ocr">OCR: ${esc(d.text || "(なし)")} ${d.match ? `→ ${esc(d.match)} (${d.score})` : ""}</div>
+        <div class="ocr">OCR: ${esc(d.text || "(なし)")} ${d.match ? `→ ${esc(d.match)} (${d.score})` : ""}
+          ${d.portrait ? `<br>顔画像: ${esc(d.portrait.match)} (${d.portrait.score})` : ""}</div>
         <div class="ctl"><input list="pokelist" placeholder="手動で選ぶ (名前を入力)" data-slot="${esc(s.id)}"><button data-clear="${esc(s.id)}">消す</button></div>
       </div>`;
     }).join("");
@@ -286,7 +300,7 @@
   async function loadIcons() {
     const list = await (await fetch("/api/icons")).json();
     $("iconcount").textContent = list.length + " 件";
-    $("iconlist").innerHTML = list.length ? list.map((it) => `<span class="chip"><img src="/api/icon/${esc(it.id)}.png" alt="">${esc(it.display)}
+    $("iconlist").innerHTML = list.length ? list.map((it) => `<span class="chip" title="${it.kind === "portrait" ? "対戦中の顔画像 (メガシンカ判定用)" : "選出画面のアイコン"}"><img src="/api/icon/${esc(it.id)}.png" alt="">${esc(it.display)}${it.kind === "portrait" ? '<span class="tag">顔</span>' : ""}
       <button data-icondel="${esc(it.id)}" title="削除">×</button></span>`).join("") : '<span class="hint">まだありません</span>';
   }
   $("iconlist").addEventListener("click", async (e) => {

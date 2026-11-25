@@ -314,6 +314,272 @@
 "Zen Mode": "ダルマモード",
 "Zero to Hero": "マイティチェンジ"
 },
+"form_abilities": {
+"abomasnow-mega": [
+"Snow Warning"
+],
+"absol-mega": [
+"Magic Bounce"
+],
+"absol-mega-z": [
+"Sharpness"
+],
+"aerodactyl-mega": [
+"Tough Claws"
+],
+"aggron-mega": [
+"Filter"
+],
+"alakazam-mega": [
+"Trace"
+],
+"altaria-mega": [
+"Pixilate"
+],
+"ampharos-mega": [
+"Mold Breaker"
+],
+"audino-mega": [
+"Healer"
+],
+"banette-mega": [
+"Prankster"
+],
+"barbaracle-mega": [
+"Tough Claws"
+],
+"baxcalibur-mega": [
+"Thermal Exchange"
+],
+"beedrill-mega": [
+"Adaptability"
+],
+"blastoise-mega": [
+"Mega Launcher"
+],
+"blaziken-mega": [
+"Speed Boost"
+],
+"camerupt-mega": [
+"Sheer Force"
+],
+"chandelure-mega": [
+"Infiltrator"
+],
+"charizard-mega-x": [
+"Tough Claws"
+],
+"charizard-mega-y": [
+"Drought"
+],
+"chesnaught-mega": [
+"Bulletproof"
+],
+"chimecho-mega": [
+"Levitate"
+],
+"clefable-mega": [
+"Magic Bounce"
+],
+"crabominable-mega": [
+"Iron Fist"
+],
+"delphox-mega": [
+"Levitate"
+],
+"diancie-mega": [
+"Magic Bounce"
+],
+"dragalge-mega": [
+"Regenerator"
+],
+"dragonite-mega": [
+"Multiscale"
+],
+"drampa-mega": [
+"Berserk"
+],
+"eelektross-mega": [
+"Eelevate"
+],
+"emboar-mega": [
+"Mold Breaker"
+],
+"excadrill-mega": [
+"Piercing Drill"
+],
+"falinks-mega": [
+"Defiant"
+],
+"feraligatr-mega": [
+"Dragonize"
+],
+"floette-mega": [
+"Fairy Aura"
+],
+"froslass-mega": [
+"Snow Warning"
+],
+"gallade-mega": [
+"Inner Focus"
+],
+"garchomp-mega": [
+"Sand Force"
+],
+"garchomp-mega-z": [
+"Levitate"
+],
+"gardevoir-mega": [
+"Pixilate"
+],
+"gengar-mega": [
+"Shadow Tag"
+],
+"glalie-mega": [
+"Refrigerate"
+],
+"glimmora-mega": [
+"Adaptability"
+],
+"golisopod-mega": [
+"Tough Claws"
+],
+"golurk-mega": [
+"Unseen Fist"
+],
+"greninja-mega": [
+"Protean"
+],
+"gyarados-mega": [
+"Mold Breaker"
+],
+"hawlucha-mega": [
+"No Guard"
+],
+"heracross-mega": [
+"Skill Link"
+],
+"houndoom-mega": [
+"Solar Power"
+],
+"kangaskhan-mega": [
+"Parental Bond"
+],
+"latias-mega": [
+"Levitate"
+],
+"latios-mega": [
+"Levitate"
+],
+"lopunny-mega": [
+"Scrappy"
+],
+"lucario-mega": [
+"Adaptability"
+],
+"lucario-mega-z": [
+"Aura Guard"
+],
+"malamar-mega": [
+"Contrary"
+],
+"manectric-mega": [
+"Intimidate"
+],
+"mawile-mega": [
+"Huge Power"
+],
+"medicham-mega": [
+"Pure Power"
+],
+"meganium-mega": [
+"Mega Sol"
+],
+"meowstic-female-mega": [
+"Trace"
+],
+"meowstic-male-mega": [
+"Trace"
+],
+"metagross-mega": [
+"Tough Claws"
+],
+"mewtwo-mega-x": [
+"Steadfast"
+],
+"mewtwo-mega-y": [
+"Insomnia"
+],
+"pidgeot-mega": [
+"No Guard"
+],
+"pinsir-mega": [
+"Aerilate"
+],
+"pyroar-mega": [
+"Fire Mane"
+],
+"raichu-mega-x": [
+"Electric Surge"
+],
+"raichu-mega-y": [
+"No Guard"
+],
+"rayquaza-mega": [
+"Delta Stream"
+],
+"sableye-mega": [
+"Magic Bounce"
+],
+"salamence-mega": [
+"Aerilate"
+],
+"sceptile-mega": [
+"Lightning Rod"
+],
+"scizor-mega": [
+"Technician"
+],
+"scolipede-mega": [
+"Shell Armor"
+],
+"scovillain-mega": [
+"Spicy Spray"
+],
+"scrafty-mega": [
+"Intimidate"
+],
+"sharpedo-mega": [
+"Strong Jaw"
+],
+"skarmory-mega": [
+"Stalwart"
+],
+"slowbro-mega": [
+"Shell Armor"
+],
+"staraptor-mega": [
+"Contrary"
+],
+"starmie-mega": [
+"Huge Power"
+],
+"steelix-mega": [
+"Sand Force"
+],
+"swampert-mega": [
+"Swift Swim"
+],
+"tyranitar-mega": [
+"Sand Stream"
+],
+"venusaur-mega": [
+"Thick Fat"
+],
+"victreebel-mega": [
+"Innards Out"
+]
+},
 "forms": {
 "abomasnow-mega": 10060,
 "absol-mega": 10057,
@@ -2793,6 +3059,100 @@
 "★Vir5409": "★Vir5409",
 "★Vul7405": "★Vul7405"
 },
+"mega_stones": [
+"Abomasite",
+"Absolite",
+"Absolite Z",
+"Aerodactylite",
+"Aggronite",
+"Alakazite",
+"Altarianite",
+"Ampharosite",
+"Audinite",
+"Banettite",
+"Barbaracite",
+"Baxcalibrite",
+"Beedrillite",
+"Blastoisinite",
+"Blazikenite",
+"Cameruptite",
+"Chandelurite",
+"Charizardite X",
+"Charizardite Y",
+"Chesnaughtite",
+"Chimechite",
+"Clefablite",
+"Crabominite",
+"Darkranite",
+"Delphoxite",
+"Diancite",
+"Dragalgite",
+"Dragoninite",
+"Drampanite",
+"Eelektrossite",
+"Emboarite",
+"Excadrite",
+"Falinksite",
+"Feraligite",
+"Floettite",
+"Froslassite",
+"Galladite",
+"Garchompite",
+"Garchompite Z",
+"Gardevoirite",
+"Gengarite",
+"Glalitite",
+"Glimmoranite",
+"Golisopite",
+"Golurkite",
+"Greninjite",
+"Gyaradosite",
+"Hawluchanite",
+"Heatranite",
+"Heracronite",
+"Houndoominite",
+"Kangaskhanite",
+"Latiasite",
+"Latiosite",
+"Lopunnite",
+"Lucarionite",
+"Lucarionite Z",
+"Magearnite",
+"Malamarite",
+"Manectite",
+"Mawilite",
+"Medichamite",
+"Meganiumite",
+"Meowsticite",
+"Metagrossite",
+"Mewtwonite X",
+"Mewtwonite Y",
+"Pidgeotite",
+"Pinsirite",
+"Pyroarite",
+"Raichunite X",
+"Raichunite Y",
+"Sablenite",
+"Salamencite",
+"Sceptilite",
+"Scizorite",
+"Scolipite",
+"Scovillainite",
+"Scraftinite",
+"Sharpedonite",
+"Skarmorite",
+"Slowbronite",
+"Staraptite",
+"Starminite",
+"Steelixite",
+"Swampertite",
+"Tatsugirinite",
+"Tyranitarite",
+"Venusaurite",
+"Victreebelite",
+"Zeraorite",
+"Zygardite"
+],
 "moves": {
 "10,000,000 Volt Thunderbolt": "１０００まんボルト",
 "Absorb": "すいとる",
