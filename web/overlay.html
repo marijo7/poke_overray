@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>採用率オーバーレイ</title>
+<!--
+  OBS のブラウザソースに http://127.0.0.1:8765/overlay を指定して使う。
+  URL パラメータ:
+    slot=opp1          表示する領域 ID (カンマ区切りで複数可。省略時は全て)
+    moves=6 items=3 abilities=2   表示件数 (0 で非表示)
+    layout=row         カードを横並びにする (既定は縦並び)
+    history=1          この対戦で見た相手の一覧を表示
+    scale=1.2          全体の拡大率
+    theme=light        明るい配色
+-->
+<style>
+  :root {
+    --bg: rgba(16, 18, 28, 0.86);
+    --fg: #f4f6fb;
+    --sub: #a9b0c4;
+    --accent: #ffcc33;
+    --bar: #4f8cff;
+    --bar-bg: rgba(255, 255, 255, 0.10);
+    --border: rgba(255, 255, 255, 0.14);
+    --scale: 1;
+  }
+  :root[data-theme="light"] {
+    --bg: rgba(250, 251, 255, 0.92);
+    --fg: #1b1f2c;
+    --sub: #5b6377;
+    --accent: #d9480f;
+    --bar: #2f6fe4;
+    --bar-bg: rgba(0, 0, 0, 0.08);
+    --border: rgba(0, 0, 0, 0.12);
+  }
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  body {
+    font-family: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif;
+    color: var(--fg);
+    zoom: var(--scale);
+  }
+  #cards { display: flex; flex-direction: column; gap: 10px; padding: 8px; align-items: flex-start; }
+  #cards.row { flex-direction: row; }
+  .card {
+    width: 300px; box-sizing: border-box;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px 14px 12px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    animation: pop 0.35s ease-out;
+  }
+  @keyframes pop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+  .head { display: flex; align-items: baseline; gap: 8px; border-bottom: 2px solid var(--accent); padding-bottom: 4px; margin-bottom: 6px; }
+  .name { font-size: 22px; font-weight: 800; letter-spacing: 0.02em; }
+  .rank { margin-left: auto; font-size: 12px; color: var(--sub); white-space: nowrap; }
+  .sec-title { font-size: 11px; color: var(--accent); font-weight: 700; margin: 6px 0 2px; letter-spacing: 0.1em; }
+  .row-item { position: relative; display: flex; justify-content: space-between; font-size: 15px; line-height: 22px; padding: 0 6px; margin: 2px 0; border-radius: 4px; background: var(--bar-bg); overflow: hidden; }
+  .row-item .fill { position: absolute; inset: 0 auto 0 0; background: var(--bar); opacity: 0.45; border-radius: 4px; }
+  .row-item span { position: relative; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row-item .pct { font-variant-numeric: tabular-nums; margin-left: 8px; flex: none; }
+  .nodata { font-size: 13px; color: var(--sub); padding: 4px 0; }
+  .credit { font-size: 9px; color: var(--sub); margin-top: 6px; text-align: right; }
+  #history { display: none; gap: 6px; flex-wrap: wrap; padding: 0 8px 8px; }
+  #history.show { display: flex; }
+  .chip { background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="cards"></div>
+<div id="history"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const opt = {
+    slots: q.get("slot") ? q.get("slot").split(",") : null,
+    moves: +(q.get("moves") ?? 6),
+    items: +(q.get("items") ?? 3),
+    abilities: +(q.get("abilities") ?? 2),
+  };
+  if (q.get("layout") === "row") document.getElementById("cards").classList.add("row");
+  if (q.get("history") === "1") document.getElementById("history").classList.add("show");
+  if (q.get("scale")) document.documentElement.style.setProperty("--scale", q.get("scale"));
+  if (q.get("theme")) document.documentElement.dataset.theme = q.get("theme");
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  function section(title, list, n) {
+    if (!n || !list || !list.length) return "";
+    const rows = list.slice(0, n).map((m) => `
+      <div class="row-item"><div class="fill" style="width:${Math.min(100, m.pct)}%"></div>
+        <span>${esc(m.name)}</span><span class="pct">${m.pct.toFixed(1)}%</span></div>`).join("");
+    return `<div class="sec-title">${title}</div>${rows}`;
+  }
+
+  function card(slot, meta) {
+    const p = slot.pokemon;
+    if (!p) {
+      return `<div class="card"><div class="head"><div class="name">${esc(slot.species)}</div></div>
+        <div class="nodata">採用率データがありません</div></div>`;
+    }
+    const rank = p.rank ? `使用率 ${p.rank}位${p.usage != null ? ` (${p.usage.toFixed(1)}%)` : ""}` : "";
+    const credit = meta && meta.source ? `データ: ${esc(meta.source)} ${esc(meta.format || "")} ${esc(meta.data_date || "")}` : "";
+    return `<div class="card">
+      <div class="head"><div class="name">${esc(p.display)}</div><div class="rank">${rank}</div></div>
+      ${section("技", p.moves, opt.moves)}
+      ${section("持ち物", p.items, opt.items)}
+      ${section("特性", p.abilities, opt.abilities)}
+      <div class="credit">${credit}</div></div>`;
+  }
+
+  let lastSig = "";
+  async function tick() {
+    try {
+      const st = await (await fetch("/api/state", { cache: "no-store" })).json();
+      const slots = st.slots.filter((s) => s.species && (!opt.slots || opt.slots.includes(s.id)));
+      const sig = JSON.stringify([slots.map((s) => [s.id, s.species, s.pokemon && s.pokemon.key]), st.history, st.usage_meta]);
+      if (sig !== lastSig) {
+        lastSig = sig;
+        document.getElementById("cards").innerHTML = slots.map((s) => card(s, st.usage_meta)).join("");
+        document.getElementById("history").innerHTML = st.history.map((h) => `<span class="chip">${esc(h.display)}</span>`).join("");
+      }
+    } catch (e) { /* サーバー停止中は何もしない */ }
+    setTimeout(tick, 500);
+  }
+  tick();
+</script>
+</body>
+</html>

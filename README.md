@@ -1,0 +1,160 @@
+# ポケモンチャンピオンズ 採用率オーバーレイ (OBS)
+
+対戦画面に映っている**相手のポケモンを画面から読み取り**、そのポケモンの
+**よく使われている技・持ち物・特性（採用率）**を OBS 上に表示するツールです。
+
+```
+キャプチャボード → OBS ─(OBS WebSocket でスクショ取得)→ main.py
+                                                         │ ① 名前の部分を切り出し
+                                                         │ ② Windows 標準 OCR で文字認識
+                                                         │ ③ 全ポケモン名とあいまい一致
+                                                         │ ④ 採用率データ (data/usage.json) を検索
+OBS ブラウザソース ← http://127.0.0.1:8765/overlay ←──┘
+```
+
+- 画面認識は Windows 標準の日本語 OCR を使うため、追加の AI モデルや GPU は不要です
+- OBS からスクリーンショットを受け取るので、キャプチャボードを OBS と取り合いません
+- 読み取りに失敗しても、設定画面から手動でポケモンを切り替えられます
+
+## 必要なもの
+
+- Windows 10 / 11
+- [Python 3.10 以降](https://www.python.org/downloads/)（インストール時に「Add python.exe to PATH」にチェック）
+- OBS Studio 28 以降（WebSocket が標準搭載）
+- Windows の日本語 OCR
+  - 設定 → 時刻と言語 → 言語と地域 → 「日本語」の「…」→ 言語のオプション → **光学式文字認識** がインストール済みであること
+  - 日本語版 Windows なら通常は入っています
+
+## セットアップ
+
+1. このフォルダを好きな場所に置き、`setup.bat` をダブルクリック
+   （仮想環境の作成・ライブラリのインストール・採用率データの取得を行います）
+2. OBS で **ツール → WebSocket サーバー設定** を開き、「WebSocket サーバーを有効にする」をオン。
+   「接続情報を表示」でパスワードを確認しておく
+3. `start.bat` を一度起動して閉じると `config.json` ができるので、メモ帳で開いて次を書き換える
+
+   ```json
+   "obs": {
+     "host": "localhost",
+     "port": 4455,
+     "password": "OBS の WebSocket パスワード",
+     "source": "映像キャプチャデバイス",   ← ゲーム画面を映している OBS のソース名
+     "width": 1920,
+     "height": 1080
+   },
+   ```
+
+4. もう一度 `start.bat` を起動
+
+## 使い方
+
+### 1. 読み取り範囲を合わせる（最初の 1 回）
+
+ブラウザで **http://127.0.0.1:8765/control** を開きます。
+
+- ゲーム画面が表示されるので、対戦中の画面にした状態で調整します
+- 右下の「領域一覧」で領域を選び、画像上で**相手ポケモンの名前の文字**をドラッグで囲む
+- ダブルバトルなら相手 2 体分（初期状態で `opp1` / `opp2` の 2 つ）、シングルなら 1 つにして「保存」
+- 「現在の表示」に OCR の読み取り結果が出るので、正しく認識されているか確認できます
+
+> 初期の範囲は仮の位置です。必ず実際の画面に合わせてください。
+
+### 2. OBS にオーバーレイを追加
+
+OBS で **ソース追加 → ブラウザ**：
+
+| 項目 | 値 |
+|---|---|
+| URL | `http://127.0.0.1:8765/overlay` |
+| 幅 / 高さ | 340 × 1080（横並びなら 700 × 450 など） |
+
+URL パラメータで表示を変えられます（`?` の後に `&` でつなぐ）：
+
+| パラメータ | 例 | 内容 |
+|---|---|---|
+| `slot` | `slot=opp1` | 特定の領域だけ表示（相手ごとに別ソースにして配置できる） |
+| `layout` | `layout=row` | カードを横並び |
+| `moves` / `items` / `abilities` | `moves=4` | 表示件数（0 で非表示） |
+| `history` | `history=1` | この対戦で見た相手の一覧を表示 |
+| `scale` | `scale=1.3` | 拡大率 |
+| `theme` | `theme=light` | 明るい配色 |
+
+例: `http://127.0.0.1:8765/overlay?slot=opp1&moves=4&items=2&scale=1.2`
+
+### 3. 対戦中
+
+- 相手が出てくると自動で切り替わります（2 回連続で同じ名前を読んだら確定）
+- 誤認識したときは設定画面の「手動で選ぶ」に名前を入れて切り替え
+- 対戦が終わったら「対戦リセット」で表示と履歴をクリア
+
+## 採用率データの更新
+
+採用率は [Pikalytics](https://www.pikalytics.com/) が公開しているデータ（使用率上位 50 匹）を取得し、
+[PokeAPI](https://pokeapi.co/) の名前データで日本語に変換しています。オーバーレイ下部に出典が表示されます。
+
+`update_usage.bat` をダブルクリックすると最新データに更新されます（起動中なら設定画面の「採用率データ再読込」で反映）。
+
+対象のルールは `config.json` の `"usage": {"format": ...}` で変えられます。
+
+| フォーマット | 内容 |
+|---|---|
+| `gen9championsvgc2026regmc` | ダブル（レギュレーション M-C）※既定 |
+| `gen9championsvgc2026regmcbo3` | ダブル M-C（3 本先取の大会データ） |
+| `gen9championsou` | シングル |
+| `gen9championsbssregma` | シングル（レギュレーション M-A） |
+
+利用可能なフォーマットは `update_usage.bat --list-formats` で確認できます。
+`data/usage.json` は手で編集しても構いません（ゲーム内の「バトルデータ」を見て自分で書き込むことも可能）。
+
+## 設定項目 (config.json)
+
+| キー | 既定値 | 説明 |
+|---|---|---|
+| `capture.backend` | `obs` | `obs`（推奨）/ `screen`（デスクトップ直接）/ `file`（画像ファイル・テスト用） |
+| `ocr.backend` | `windows` | `windows` / `tesseract` |
+| `ocr.scale` | `2.0` | OCR 前の拡大率。小さい文字が読めないときは 3 に |
+| `interval_sec` | `0.5` | 読み取り間隔（秒） |
+| `confirm_frames` | `2` | 同じ名前を何回連続で読んだら切り替えるか |
+| `min_ratio` | `0.72` | あいまい一致の閾値。誤認識が多ければ上げる |
+| `server.port` | `8765` | Web サーバーのポート |
+
+## うまくいかないとき
+
+| 症状 | 対処 |
+|---|---|
+| 設定画面に「エラー: ...connect...」 | OBS が起動しているか、WebSocket が有効か、ポート・パスワードが合っているか |
+| 「ソースが見つからない」系のエラー | `config.json` の `source` を OBS のソース名と完全に一致させる |
+| 「日本語 OCR が見つかりません」 | 上記「必要なもの」の光学式文字認識をインストール |
+| OCR 結果が空・でたらめ | 範囲を名前の文字に合わせ直す / `ocr.scale` を 3 にする |
+| 採用率データがありません | そのポケモンが上位 50 匹に入っていない。手動で `data/usage.json` に追加可能 |
+
+## 制限事項
+
+- Pokémon Champions の画面レイアウトは実機で検証していません。読み取り範囲は各自で合わせてください
+- メガシンカなどのフォルム違いは「種族名」で判定し、データ上で最も使用率の高いフォルムを表示します。
+  別フォルムを表示したいときは手動で選んでください
+- 採用率データは Pikalytics の集計で、ゲーム内の「バトルデータ」とは数値が異なる場合があります
+
+## 開発者向け
+
+```
+main.py               起動スクリプト
+overlay/capture.py    画面取得 (OBS / screen / file)
+overlay/ocr.py        OCR (Windows.Media.Ocr / Tesseract)
+overlay/names.py      日本語名辞書・あいまい一致・Showdown 名 → 日本語
+overlay/recognizer.py 認識ループと共有状態
+overlay/server.py     HTTP サーバー (/overlay, /control, /api/*)
+web/                  オーバーレイと設定画面
+tools/build_names.py  data/names.json の再生成 (PokeAPI)
+tools/update_usage.py 採用率データの取得 (Pikalytics)
+```
+
+テスト: `python -m unittest discover -s tests -t .`
+
+Windows 以外で動作確認する場合は Tesseract（`jpn` 言語データ）を入れ、`ocr.backend` を `tesseract` にしてください。
+
+## クレジット
+
+- 採用率データ: [Pikalytics](https://www.pikalytics.com/)
+- 日本語名データ: [PokeAPI](https://pokeapi.co/)
+- ポケモンは任天堂・クリーチャーズ・ゲームフリークの登録商標です。本ツールは非公式のファンメイドツールです。

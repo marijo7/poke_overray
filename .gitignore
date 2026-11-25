@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+# 個人設定 (OBS のパスワード等を含む)
+config.json
+# 採用率データは tools/update_usage.py で各自取得する
+data/usage.json
