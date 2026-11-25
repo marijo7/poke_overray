@@ -81,6 +81,11 @@ class TestMega(unittest.TestCase):
         self.assertFalse(self.rec.portraits.has_key("フラエッテ"))
         self.assertEqual(self.state.slots["opp1"]["ident"], "フラエッテ")
 
+    def test_manual_mega_updates_party(self):
+        self.state.set_party("me", ["フラエッテ", "ビビヨン"])
+        self.state.set_slot("me2", ident="メガフラエッテ", side="me", source="manual")
+        self.assertEqual(self.state.parties["me"][0], "Floette-Mega")
+
     def test_my_party_restored_on_reset(self):
         self.state.set_party("me", ["フラエッテ", "ビビヨン"])
         self.state.set_slot("me1", ident="フラエッテ", side="me")

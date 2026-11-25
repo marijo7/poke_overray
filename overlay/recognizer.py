@@ -63,6 +63,11 @@ class State:
                 info = self._resolve(ident)
                 self.slots[region_id] = {"ident": info["key"], "species": info["species"], "side": side,
                                          "source": source, "updated": time.time()}
+                if is_mega(info["key"]):  # 手動でメガシンカ後の姿を選んだときもパーティ表示を差し替える
+                    mine = self.parties[side]
+                    for i, m in enumerate(mine):
+                        if self._resolve(m)["species"] == info["species"]:
+                            mine[i] = info["key"]
                 party = self.parties["opp"]
                 if side == "opp" and all(self._resolve(m)["species"] != info["species"] for m in party):
                     unknown = [m for m in party if m.startswith("icon:")]
