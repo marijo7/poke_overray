@@ -36,7 +36,7 @@ def _unit(v):
     return v / max(float(np.linalg.norm(v)), 1e-6)
 
 
-def _best(G, h, w, mask, t, step=2):
+def _best(G, h, w, mask, t, step=1):  # step=2 だと 1px のずれで一致度が 0.44〜0.73 と大きく揺れたので 1
     """G の中で、大きさ (h, w) の窓をずらしながら、mask 内の画素の正規化相関の最大値"""
     if w > G.shape[1] or h > G.shape[0]:
         return -1.0

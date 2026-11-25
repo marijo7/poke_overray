@@ -54,6 +54,7 @@
   .chip.unknown input { width: 120px; }
   .chip.unknown { flex-wrap: wrap; }
   .chip .cands { flex-basis: 100%; font-size: 12px; color: var(--sub); padding: 2px 4px; }
+  #nickunknown .cands button { font-size: 12px; padding: 1px 8px; margin: 2px 2px 0 0; border: 1px solid var(--accent); border-radius: 999px; background: var(--panel); color: var(--accent); }
   .chip .cands button { font-size: 12px; padding: 1px 8px; margin: 2px 2px 0 0; border: 1px solid var(--accent); border-radius: 999px; background: var(--panel); color: var(--accent); }
   .fontpreview { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: rgba(16, 18, 28, 0.9); color: #f4f6fb; }
   .fontpreview .fp-name { font-size: 22px; font-weight: 800; border-bottom: 2px solid #ffcc33; margin-bottom: 6px; }
@@ -417,10 +418,18 @@
     const sig = JSON.stringify(list);
     if (sig === lastUnknown || $("nickunknown").contains(document.activeElement)) return;
     lastUnknown = sig;
+    loadNicknames();  // 自動で登録されたものも一覧に出す
     $("nickunknown").innerHTML = list.map((n) => `<div class="row" style="margin:4px 0">
         <span class="tag">${n.side === "me" ? "自分" : "相手"}</span><b>${esc(n.nick)}</b> =
-        <input list="pokelist" placeholder="何のポケモン？" data-nick="${esc(n.nick)}" style="flex:1;min-width:0"></div>`).join("");
+        <input list="pokelist" placeholder="何のポケモン？" data-nick="${esc(n.nick)}" style="flex:1;min-width:0">
+        ${(n.cands || []).length ? `<div class="cands" style="flex-basis:100%">絵が近い: ${n.cands.map((c) =>
+          `<button data-nick-label="${esc(n.nick)}" data-nick-name="${esc(c.key)}">${esc(c.display)}</button>`).join("")}</div>` : ""}</div>`).join("");
   }
+  $("nickunknown").addEventListener("click", async (e) => {  // 候補のボタン
+    if (!e.target.dataset.nickLabel) return;
+    await post("/api/nickname", { nick: e.target.dataset.nickLabel, name: e.target.dataset.nickName });
+    lastUnknown = ""; myLoaded = false; loadNicknames();
+  });
   $("nickunknown").addEventListener("change", async (e) => {
     const nick = e.target.dataset.nick, name = e.target.value.trim();
     if (!nick || !name) return;
@@ -430,7 +439,7 @@
   });
   async function loadNicknames() {
     const list = await (await fetch("/api/nicknames")).json();
-    $("nicklist").innerHTML = list.map((n) => `<span class="chip">${esc(n.nick)} = ${esc(n.display)}
+    $("nicklist").innerHTML = list.map((n) => `<span class="chip">${esc(n.nick)} = ${esc(n.display)}${n.auto ? '<span class="tag" title="絵から自動で登録。違っていたら × で消してください">自動</span>' : ""}
       <button data-nickdel="${esc(n.nick)}" title="削除">×</button></span>`).join("") || '<span class="hint">登録はまだありません</span>';
   }
   $("nicklist").addEventListener("click", async (e) => {

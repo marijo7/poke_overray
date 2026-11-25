@@ -87,3 +87,15 @@ class TestPresets(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIdentifyByChampionGuard(unittest.TestCase):
+    def test_skip_when_party_has_unknown_member(self):
+        """パーティに分からないポケモンがいると正解が候補に無いことがあるので、絵での判定をしない"""
+        from overlay.recognizer import Recognizer
+        st = State(usage(), nicknames=NicknameDB(Path(tempfile.mkdtemp()) / "n.json"))
+        rec = Recognizer(st, lambda: {})
+        r = {"id": "me1", "side": "me", "portrait": {"x": 0, "y": 0, "w": 1, "h": 1}}
+        st.set_party("me", ["nick:もちまる", "イエッサン(♀)"])
+        from PIL import Image
+        self.assertIsNone(rec.identify_by_champion(Image.new("RGB", (100, 100)), r))

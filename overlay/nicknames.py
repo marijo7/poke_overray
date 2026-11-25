@@ -42,12 +42,13 @@ class NicknameDB:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.items, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    def set(self, nick: str, ident: str):
+    def set(self, nick: str, ident: str, auto: bool = False):
+        """auto=True: 画像から自動で登録したもの (設定画面に「自動」と表示。違っていたら削除してもらう)"""
         k = nick_key(nick)
         if not k:
             return
         with self.lock:
-            self.items[k] = {"nick": clean_nick(nick), "ident": ident}
+            self.items[k] = {"nick": clean_nick(nick), "ident": ident, **({"auto": True} if auto else {})}
             self._save()
 
     def remove(self, nick: str) -> bool:

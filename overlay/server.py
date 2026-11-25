@@ -214,7 +214,9 @@ def make_handler(app: App):
                 if isinstance(pv, dict):
                     cur = app.cfg.setdefault("preview", {})
                     for k in ("marker", "opp_first", "opp_last", "my_first", "my_last",
-                              "my_gender_first", "my_gender_last", "opp_gender_first", "opp_gender_last"):
+                              "my_gender_first", "my_gender_last", "opp_gender_first", "opp_gender_last",
+                              "my_icon_first", "my_icon_last", "opp_type1_first", "opp_type1_last",
+                              "opp_type2_first", "opp_type2_last"):
                         if isinstance(pv.get(k), dict):
                             cur[k] = {c: min(1.0, max(0.0, float(pv[k][c]))) for c in ("x", "y", "w", "h")}
                     if "enabled" in pv:

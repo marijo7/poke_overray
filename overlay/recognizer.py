@@ -123,9 +123,12 @@ class State:
         self.icon_guess.pop(uid, None)
         self.parties["opp"] = [key if m == "icon:" + uid else m for m in self.parties["opp"]]
 
-    def add_unknown_nick(self, nick, side):
+    def add_unknown_nick(self, nick, side, cands=None):
+        """cands: 絵から見て近いポケモン (設定画面で候補のボタンにする)"""
         with self.lock:
-            self.unknown_nicks.setdefault(nick_key(nick), {"nick": clean_nick(nick), "side": side})
+            item = self.unknown_nicks.setdefault(nick_key(nick), {"nick": clean_nick(nick), "side": side, "cands": []})
+            if cands:
+                item["cands"] = list(cands)
 
     def label_nickname(self, nick, name):
         """ニックネームに対応するポケモンを登録し、パーティ内の仮表示 (nick:) を置き換える。戻り値: 登録したキー"""
@@ -216,7 +219,8 @@ class State:
                              "cands": [{"key": c, "display": self._resolve(c)["display"]} for c in g["cands"][:6]],
                              "guess": g.get("guess")}
                        for uid, g in self.icon_guess.items()}
-            unknown = [dict(v) for v in self.unknown_nicks.values()]
+            unknown = [dict(v, cands=[{"key": c, "display": self._resolve(c)["display"]} for c in v.get("cands", [])])
+                       for v in self.unknown_nicks.values()]
             dbg = {k: v for k, v in self.debug.items() if k == "preview" or k.startswith(("my", "icon"))}
             return {"version": self.version, "slots": slots, "parties": parties, "unknown_nicks": unknown,
                     "preview_debug": dbg,
@@ -243,6 +247,8 @@ class Recognizer(threading.Thread):
         self.pending_nick = {}      # region id -> 未登録ニックネームを続けて読んだ回数
         self.layout_votes = {}      # 他の画面レイアウトで選出画面が読めた回数
         self.battle_seen = False    # 前の選出画面のあと、対戦画面でポケモンを読み取ったか (= 次の選出画面は新しい対戦)
+        self.my_icon_cache = {}     # 選出画面の自分のポケモンの絵の判定結果 (対戦ごと)
+        self.last_champ_margin = 0.0
 
     def _setup(self):
         cfg = self.get_config()
@@ -370,6 +376,7 @@ class Recognizer(threading.Thread):
             self.pending.clear()
             self.battle_no += 1
             self.preview_opp, self.preview_my = [None] * n, [None] * n
+            self.my_icon_cache = {}
             self.state.status["battle"] = f"{self.battle_no} 戦目 ({reason})"
         self.battle_seen = False
         self.last_preview_seen = now
@@ -430,9 +437,18 @@ class Recognizer(threading.Thread):
                         nsp = resolve(nick, self.state.usage)["species"]
                         self.preview_my[i] = gender_variant(nsp, g, self.state.usage) or nick
                         continue
-                    if looks_like_name(text):  # 未登録のニックネーム → 仮表示して、設定画面で教えてもらう
-                        self.preview_my[i] = "nick:" + clean_nick(text)
-                        self.state.add_unknown_nick(text, "me")
+                    if looks_like_name(text):
+                        # 未登録のニックネーム → 名前の右の絵を Champions の画像と比べる。はっきり分かれば自動で登録
+                        guess, cands = self.my_icon_guess(frame, pv, i, n)
+                        if guess:
+                            key = gender_variant(resolve(guess, self.state.usage)["species"], g, self.state.usage) or guess
+                            self.state.nicknames.set(text, key, auto=True)
+                            self.preview_my[i] = key
+                            log.info("ニックネーム「%s」を絵から %s と判定して登録", clean_nick(text),
+                                     resolve(key, self.state.usage)["display"])
+                            continue
+                        self.preview_my[i] = "nick:" + clean_nick(text)  # 分からなければ仮表示して、設定画面で選んでもらう
+                        self.state.add_unknown_nick(text, "me", cands)
                         continue
                 if sp:
                     sp = gender_variant(sp, g, self.state.usage) or sp
@@ -443,6 +459,51 @@ class Recognizer(threading.Thread):
                 self.state.set_party("me", mine)
                 cfg["my_party"] = mine
                 save_config(cfg)
+
+    def my_icon_guess(self, frame, pv, i, n):
+        """選出画面の自分のポケモンの絵を、Champions の全ポケモンの画像と比べる (色+輪郭。色違いにも強い)。
+        戻り値: (はっきり 1 匹に決まればそのキー, 候補の上位)。1 回の対戦で 1 度だけ計算する。"""
+        if i in self.my_icon_cache:
+            return self.my_icon_cache[i]
+        res = (None, [])
+        if pv.get("my_icon_first") and self.champ.available():
+            crop = crop_rect(frame, _lerp(pv["my_icon_first"], pv["my_icon_last"], i, n))
+            scored = [((c + e) / 2, k) for k, c, e in self.champ.rank(crop, self.state.usage.roster())]
+            if scored:
+                # 実測 (Switch 版・色違い含む): 正解は 2 位に 0.11〜0.39 の差。0.07 以下は決めない
+                ok = scored[0][0] >= 0.5 and (len(scored) < 2 or scored[0][0] - scored[1][0] >= 0.10)
+                res = (scored[0][1] if ok else None, [k for _, k in scored[:4]])
+        self.my_icon_cache[i] = res
+        return res
+
+    def champ_key(self, member):
+        """パーティの登録 (日本語名やキー) → Champions の画像のキー"""
+        info = resolve(member, self.state.usage)
+        if not info or not info.get("species"):
+            return None
+        if info["key"] in self.champ.map:
+            return info["key"]
+        return next((k for k in self.state.usage.roster()
+                     if resolve(k, self.state.usage)["species"] == info["species"] and k in self.champ.map), None)
+
+    def identify_by_champion(self, frame, r):
+        """ニックネームで名前が分からないとき、名前の横の顔画像を、パーティのポケモンの Champions の画像と比べる。"""
+        if not r.get("portrait") or not self.champ.available():
+            return None
+        party = self.state.parties.get(r.get("side", "opp"), [])
+        if not party or any(m.startswith(("nick:", "icon:")) for m in party):
+            # パーティにまだ分からないポケモンがいると、正解が候補に入っていないことがある (それを他と取り違えないよう使わない)
+            return None
+        keys = {self.champ_key(m) for m in party} - {None}
+        if not keys:
+            return None
+        outer, _ = crop_with_margin(frame, r["portrait"])
+        scored = sorted((((c + e) / 2, k) for k, c, e in self.champ.rank(outer, keys)), reverse=True)
+        # 実測 (パーティ 6 匹の中から): 正解は 2 位に 0.06〜0.30 の差
+        if scored and scored[0][0] >= 0.35 and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.05):
+            self.last_champ_margin = scored[0][0] - (scored[1][0] if len(scored) > 1 else 0)
+            return scored[0][1]
+        return None
 
     def read_types(self, uid):
         """タイプアイコン 2 つを、覚えたタイプアイコンと照合する。戻り値: タイプのリスト (読めなければ None)"""
@@ -535,6 +596,10 @@ class Recognizer(threading.Thread):
                 hint, via = self.state.nicknames.match(text), "nickname"
                 if not hint:
                     hint, via = self.identify_by_portrait(frame, r), "portrait"
+                if not hint:
+                    hint, via = self.identify_by_champion(frame, r), "image"
+                    if hint and r.get("side") == "me" and self.last_champ_margin >= 0.10:
+                        self.state.nicknames.set(text, hint, auto=True)  # はっきりしていれば自分のニックネームとして覚える
                 if hint:
                     info = resolve(hint, self.state.usage)
                     species, score = info["species"], 0.9
