@@ -103,6 +103,7 @@
   async function tick() {
     try {
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
+      if (window.applyOverlayFont) window.applyOverlayFont(st.display);  // 設定画面で選んだフォント
       const p = st.parties;
       const sig = JSON.stringify(p);
       if (sig !== lastSig) {

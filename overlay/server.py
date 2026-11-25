@@ -16,6 +16,7 @@ from .names import all_names_ja
 ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
 SPRITE_DIR = ROOT / "data" / "sprites"
+FONT_EXTS = {".ttf", ".otf", ".woff", ".woff2"}
 # ポケモン HOME の画像 (PokeAPI がホストしているもの)。初回だけ取得して data/sprites に保存する
 SPRITE_URLS = [
     "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/{id}.png",
@@ -86,7 +87,13 @@ def make_handler(app: App):
                 path += ".html"
 
             if path == "/api/state":
-                return self._json(app.state.snapshot(app.cfg["regions"]))
+                snap = app.state.snapshot(app.cfg["regions"])
+                snap["display"] = app.cfg.get("display", {})
+                return self._json(snap)
+            if path == "/api/fonts":  # web/fonts に置かれたフォントファイル
+                d = WEB_DIR / "fonts"
+                files = sorted(f.name for f in d.iterdir() if f.suffix.lower() in FONT_EXTS) if d.exists() else []
+                return self._json(files)
             if path == "/api/frame.jpg":
                 jpeg = app.state.frame_jpeg()
                 if jpeg is None:
@@ -200,6 +207,19 @@ def make_handler(app: App):
                     app.cfg["my_party"] = app.state.parties["me"]
                     save_config(app.cfg)
                 return self._json({"ok": True})
+            if path == "/api/display":
+                cur = app.cfg.setdefault("display", {})
+                for k in ("font", "gfont", "fontfile"):
+                    if k in body:
+                        v = str(body[k] or "").strip()[:100]
+                        if k == "fontfile" and v and (Path(v).name != v or Path(v).suffix.lower() not in FONT_EXTS):
+                            return self._json({"error": "フォントファイル名が不正です"}, 400)
+                        cur[k] = v
+                if "fontweight" in body:
+                    w = int(body.get("fontweight") or 0)
+                    cur["fontweight"] = w if 100 <= w <= 900 else 0
+                save_config(app.cfg)
+                return self._json({"ok": True, "display": cur})
             if path == "/api/natures":
                 key = str(body.get("key", ""))
                 if app.usage.get(key) is None:

@@ -52,6 +52,9 @@
   .chip.unknown { border-style: dashed; padding-right: 6px; }
   .chip.unknown img { width: 40px; height: 40px; border-radius: 4px; }
   .chip.unknown input { width: 120px; }
+  .fontpreview { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: rgba(16, 18, 28, 0.9); color: #f4f6fb; }
+  .fontpreview .fp-name { font-size: 22px; font-weight: 800; border-bottom: 2px solid #ffcc33; margin-bottom: 6px; }
+  .fontpreview .fp-row { display: flex; justify-content: space-between; font-size: 15px; line-height: 22px; padding: 0 6px; margin: 2px 0; border-radius: 4px; background: rgba(79, 140, 255, 0.45); }
   .rect.pv { border-color: #b197fc; background: rgba(177, 151, 252, 0.12); }
   .rect.pv span { background: #b197fc; }
   .rect.ghost { border-style: dashed; opacity: 0.7; }
@@ -124,6 +127,32 @@
       <p class="hint">ゲーム内の「バトルデータ」などを見て入力すると、カードに性格の採用率が出ます。採用率データの更新では消えません (data/natures.json に保存)。全部空にして保存すると削除。</p>
     </div>
     <div class="panel">
+      <h2>フォント</h2>
+      <div class="row">
+        <select id="fontmode">
+          <option value="">既定 (BIZ UDPゴシック)</option>
+          <option value="font">PC のフォント</option>
+          <option value="gfont">Google Fonts</option>
+          <option value="fontfile">フォントファイル</option>
+        </select>
+        <select id="fontweight" title="文字の太さ">
+          <option value="0">太さ: 既定</option><option value="300">細め</option><option value="500">やや太め</option>
+          <option value="700">太字</option><option value="800">極太</option>
+        </select>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <input id="fontname" list="fontsuggest" placeholder="フォント名" style="flex:1;min-width:0">
+        <select id="fontfile" style="flex:1;min-width:0"></select>
+      </div>
+      <div id="fontpreview" class="fontpreview">
+        <div class="fp-name">イエッサン(♀)</div>
+        <div class="fp-row"><span>このゆびとまれ</span><span>98.5%</span></div>
+        <div class="fp-row"><span>ゴツゴツメット</span><span>43.5%</span></div>
+      </div>
+      <div class="row" style="margin-top:8px"><button class="primary" id="fontsave">保存して反映</button><span id="fontsaved" class="hint"></span></div>
+      <p class="hint" id="fonthint"></p>
+    </div>
+    <div class="panel">
       <h2>OBS への追加</h2>
       <p class="hint" style="margin-top:0">ソース追加 → ブラウザ → URL に以下を入力。幅 340 / 高さ 1080 程度。</p>
       <p><code id="url"></code></p>
@@ -131,13 +160,14 @@
       <p class="hint" style="margin-bottom:0">パーティ表示 (幅 560 / 高さ 260 程度):</p>
       <p><code id="partyurl"></code></p>
       <p class="hint"><code>?side=opp</code> 相手だけ、<code>?layout=column</code> 縦並び、<code>&amp;size=64</code> 画像サイズ。</p>
-      <p class="hint">フォント: <code>&amp;font=メイリオ</code> (PC のフォント)、<code>&amp;gfont=M PLUS Rounded 1c</code> (Google Fonts)、<code>&amp;fontfile=MyFont.ttf</code> (web/fonts に置いたファイル)。</p>
+      <p class="hint">フォントは上の「フォント」で変更できます。ソースごとに変えたい場合は URL に <code>&amp;gfont=…</code> 等を付けると、そちらが優先されます。</p>
     </div>
   </section>
 </main>
 <datalist id="pokelist"></datalist>
 <datalist id="usagelist"></datalist>
 <datalist id="naturelist"></datalist>
+<datalist id="fontsuggest"></datalist>
 <script>
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -323,6 +353,65 @@
     setTimeout(() => ($("natsaved").textContent = ""), 2500);
   };
 
+  // ---- フォント ----
+  const FONT_SUGGEST = {
+    font: ["BIZ UDPゴシック", "BIZ UDP明朝 Medium", "メイリオ", "游ゴシック", "Yu Gothic UI", "MS ゴシック", "UD デジタル 教科書体 N-R"],
+    gfont: ["M PLUS Rounded 1c", "Zen Maru Gothic", "Kosugi Maru", "Noto Sans JP", "M PLUS 1p", "Zen Kaku Gothic New",
+            "Dela Gothic One", "DotGothic16", "RocknRoll One", "Reggae One", "Mochiy Pop One", "Kaisei Decol", "Yusei Magic"],
+  };
+  const FONT_HINT = {
+    "": "", font: "PC にインストールされているフォント名を入力 (候補から選択可)。OBS を動かす PC にあるフォントが使えます。",
+    gfont: "Google Fonts のフォント名を入力 (候補から選択可)。インストール不要、配信での利用も可。要インターネット。",
+    fontfile: "web/fonts フォルダに .ttf / .otf / .woff2 を置くと選べます (置いたら設定画面を再読み込み)。",
+  };
+  function fontUI() {
+    const mode = $("fontmode").value;
+    $("fontname").style.display = mode === "font" || mode === "gfont" ? "" : "none";
+    $("fontfile").style.display = mode === "fontfile" ? "" : "none";
+    $("fontsuggest").innerHTML = (FONT_SUGGEST[mode] || []).map((f) => `<option value="${esc(f)}">`).join("");
+    $("fonthint").textContent = FONT_HINT[mode];
+    previewFont();
+  }
+  function fontSettings() {
+    const mode = $("fontmode").value, name = $("fontname").value.trim();
+    return { font: mode === "font" ? name : "", gfont: mode === "gfont" ? name : "",
+             fontfile: mode === "fontfile" ? $("fontfile").value : "", fontweight: +$("fontweight").value };
+  }
+  function previewFont() {  // 設定画面の中だけで見本を表示 (保存するまで OBS には反映しない)
+    const s = fontSettings(), pv = $("fontpreview");
+    document.querySelectorAll("[data-preview-font]").forEach((e) => e.remove());
+    let fam = "";
+    if (s.gfont) {
+      const l = document.createElement("link"); l.rel = "stylesheet"; l.dataset.previewFont = "1";
+      l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(s.gfont).replace(/%20/g, "+") + ":wght@400;500;700;800&display=swap";
+      document.head.appendChild(l); fam = `"${s.gfont}"`;
+    } else if (s.fontfile) {
+      const st = document.createElement("style"); st.dataset.previewFont = "1";
+      st.textContent = `@font-face { font-family: "PreviewFont"; src: url("/fonts/${encodeURIComponent(s.fontfile)}"); }`;
+      document.head.appendChild(st); fam = '"PreviewFont"';
+    } else if (s.font) fam = `"${s.font}"`;
+    pv.style.fontFamily = (fam ? fam + ", " : "") + '"BIZ UDPGothic", "Yu Gothic UI", "Meiryo", sans-serif';
+    pv.style.fontWeight = s.fontweight || 400;
+  }
+  async function loadFontSettings() {
+    const files = await (await fetch("/api/fonts")).json();
+    $("fontfile").innerHTML = files.length ? files.map((f) => `<option>${esc(f)}</option>`).join("") : '<option value="">(web/fonts にファイルがありません)</option>';
+    const st = await (await fetch("/api/state")).json();
+    const d = st.display || {};
+    $("fontmode").value = d.gfont ? "gfont" : d.fontfile ? "fontfile" : d.font ? "font" : "";
+    $("fontname").value = d.gfont || d.font || "";
+    if (d.fontfile) $("fontfile").value = d.fontfile;
+    $("fontweight").value = String(d.fontweight || 0);
+    fontUI();
+  }
+  $("fontmode").addEventListener("change", () => { $("fontname").value = ""; fontUI(); });
+  for (const id of ["fontname", "fontfile", "fontweight"]) $(id).addEventListener("change", previewFont);
+  $("fontsave").onclick = async () => {
+    const r = await post("/api/display", fontSettings());
+    $("fontsaved").textContent = r.ok ? "保存しました (OBS の表示にも反映されます)" : "失敗: " + r.error;
+    setTimeout(() => ($("fontsaved").textContent = ""), 3000);
+  };
+
   // ---- パーティ ----
   let myLoaded = false, oppParty = [];
   function renderMyParty(members) {
@@ -403,7 +492,7 @@
 
   (async () => {
     const cfg = await (await fetch("/api/config")).json();
-    regions = cfg.regions; preview = cfg.preview; renderRegions(); loadIcons(); loadPokemon(); loadNatures(); tick();
+    regions = cfg.regions; preview = cfg.preview; renderRegions(); loadIcons(); loadPokemon(); loadNatures(); loadFontSettings(); tick();
   })();
 </script>
 </body>

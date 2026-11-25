@@ -49,6 +49,8 @@ DEFAULT_CONFIG = {
         "icon_threshold": 0.8,   # アイコン一致度の閾値 (0〜1)
         "auto_my_party": True,   # 自分のパーティを選出画面から自動登録する
     },
+    # 表示設定 (設定画面から変更)。フォントは font (PC のフォント) / gfont (Google Fonts) / fontfile (web/fonts のファイル)
+    "display": {"font": "", "gfont": "", "fontfile": "", "fontweight": 0},
     # 自分のパーティ (設定画面から登録)
     "my_party": [],
     # 対戦中のポケモン名の範囲。座標は画面全体に対する割合 (0〜1)。設定画面 (/control) でドラッグして調整する

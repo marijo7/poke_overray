@@ -192,6 +192,7 @@
   async function tick() {
     try {
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
+      if (window.applyOverlayFont) window.applyOverlayFont(st.display);  // 設定画面で選んだフォント
       // ポケモンがいない枠も (見えないカードで) 場所を確保し、カードの位置がずれないようにする
       const slots = st.slots.filter((s) => (opt.slots ? opt.slots.includes(s.id) : s.side === "opp"));
       const sig = JSON.stringify([slots.map((s) => [s.id, s.display, s.sprite, s.mega, s.pokemon && s.pokemon.key, s.pokemon && s.pokemon.natures]), st.history, st.usage_meta]);
