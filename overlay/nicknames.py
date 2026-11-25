@@ -1,7 +1,7 @@
 """ニックネームとポケモンの対応を覚える。
 
 ポケモン名の代わりにニックネームが表示されることがある。
-一度「しのみや = イエッサン(♀)」と教えれば、以後は選出画面・対戦画面とも自動で認識する。
+一度「ニックネーム = 何のポケモンか」を教えれば、以後は選出画面・対戦画面とも自動で認識する。
 """
 import difflib
 import json
@@ -71,7 +71,7 @@ class NicknameDB:
                 return self.items[k]["ident"]
             best, best_score = None, 0.0
             for key, v in self.items.items():
-                if key in k and len(key) >= 3:  # 余計な文字が付いている (「しのみや「リ」 等)
+                if key in k and len(key) >= 3:  # 余計な文字が付いている (OCR で末尾に記号などが混ざった場合)
                     return v["ident"]
                 s = difflib.SequenceMatcher(None, k, key).ratio()
                 if s > best_score:
