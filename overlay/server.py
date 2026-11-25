@@ -164,7 +164,8 @@ def make_handler(app: App):
                 pv = body.get("preview")
                 if isinstance(pv, dict):
                     cur = app.cfg.setdefault("preview", {})
-                    for k in ("marker", "opp_first", "opp_last", "my_first", "my_last"):
+                    for k in ("marker", "opp_first", "opp_last", "my_first", "my_last",
+                              "my_gender_first", "my_gender_last", "opp_gender_first", "opp_gender_last"):
                         if isinstance(pv.get(k), dict):
                             cur[k] = {c: min(1.0, max(0.0, float(pv[k][c]))) for c in ("x", "y", "w", "h")}
                     if "enabled" in pv:
@@ -174,8 +175,9 @@ def make_handler(app: App):
                     item = {"id": str(r["id"]), "label": str(r.get("label", r["id"])),
                             "side": "me" if r.get("side") == "me" else "opp",
                             **{k: min(1.0, max(0.0, float(r[k]))) for k in ("x", "y", "w", "h")}}
-                    if isinstance(r.get("portrait"), dict):
-                        item["portrait"] = {k: min(1.0, max(0.0, float(r["portrait"][k]))) for k in ("x", "y", "w", "h")}
+                    for sub in ("portrait", "gender"):  # 顔画像 / 性別マークの範囲
+                        if isinstance(r.get(sub), dict):
+                            item[sub] = {k: min(1.0, max(0.0, float(r[sub][k]))) for k in ("x", "y", "w", "h")}
                     clean.append(item)
                 app.cfg["regions"] = clean
                 save_config(app.cfg)

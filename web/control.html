@@ -69,7 +69,7 @@
     <div class="panel">
       <h2>読み取り範囲</h2>
       <div id="stage"><img id="frame" alt=""><div class="noframe" id="noframe">画面を取得できていません</div></div>
-      <p class="hint">下の一覧で領域を選び、画像上をドラッグすると範囲を設定できます。「名前」は<b>名前の文字だけ</b>が入るように、「顔」は名前の左の小さなポケモンの絵を囲みます（メガシンカの判定に使用）。調整したら「保存」を押してください。</p>
+      <p class="hint">下の一覧で領域を選び、画像上をドラッグすると範囲を設定できます。「名前」は<b>名前の文字だけ</b>が入るように、「顔」は名前の左の小さなポケモンの絵（メガシンカの判定に使用）、「性別」は名前の右の ♀/♂ マーク（イエッサン等の性別違いの判定に使用）を囲みます。調整したら「保存」を押してください。</p>
     </div>
     <div class="panel">
       <h2>領域一覧 (対戦中の名前)</h2>
@@ -150,7 +150,9 @@
   let selected = "r0";   // "r<番号>" = 対戦中の領域 / "p:<名前>" = 選出画面の領域
   let dirty = false;
   const PV_ITEMS = [["marker", "マーカー"], ["opp_first", "相手アイコン 1匹目"], ["opp_last", "相手アイコン 6匹目"],
-                    ["my_first", "自分の名前 1匹目"], ["my_last", "自分の名前 6匹目"]];
+                    ["my_first", "自分の名前 1匹目"], ["my_last", "自分の名前 6匹目"],
+                    ["my_gender_first", "自分の性別マーク 1匹目"], ["my_gender_last", "自分の性別マーク 6匹目"],
+                    ["opp_gender_first", "相手の性別マーク 1匹目"], ["opp_gender_last", "相手の性別マーク 6匹目"]];
   const selRect = () => {
     if (selected.startsWith("p:")) return preview && preview[selected.slice(2)];
     const r = regions[+selected.slice(1)];
@@ -158,6 +160,10 @@
     if (selected[0] === "q") {  // 顔画像の範囲 (無ければ名前の左に作る)
       r.portrait = r.portrait || { x: Math.max(0, r.x - r.h * 1.2), y: r.y, w: r.h * 1.0, h: r.h * 2 };
       return r.portrait;
+    }
+    if (selected[0] === "g") {  // 性別マークの範囲 (無ければ名前の右に作る)
+      r.gender = r.gender || { x: Math.min(0.98, r.x + r.w), y: r.y, w: r.h * 0.6, h: r.h };
+      return r.gender;
     }
     return r;
   };
@@ -175,7 +181,8 @@
     $("regions").innerHTML = regions.map((r, i) => `
       <tr>
         <td><label title="名前の範囲を編集"><input type="radio" name="sel" ${"r" + i === selected ? "checked" : ""} data-sel="r${i}">名前</label>
-            <label title="顔画像の範囲を編集 (メガシンカの判定に使う)"><input type="radio" name="sel" ${"q" + i === selected ? "checked" : ""} data-sel="q${i}">顔</label></td>
+            <label title="顔画像の範囲を編集 (メガシンカの判定に使う)"><input type="radio" name="sel" ${"q" + i === selected ? "checked" : ""} data-sel="q${i}">顔</label>
+            <label title="性別マーク (♀/♂) の範囲を編集 (イエッサン等の性別違いの判定に使う)"><input type="radio" name="sel" ${"g" + i === selected ? "checked" : ""} data-sel="g${i}">性別</label></td>
         <td><input type="text" value="${esc(r.id)}" data-i="${i}" data-k="id" title="ID (URL の slot= に使う)"></td>
         <td><input type="text" value="${esc(r.label)}" data-i="${i}" data-k="label" title="表示名"></td>
         <td><select data-i="${i}" data-k="side" title="どちらのポケモン名か">
@@ -188,6 +195,7 @@
     if (!pvSel) regions.forEach((r, i) => {
       addRect(r, "r" + i === selected ? "sel" : "", r.label || r.id);
       if (r.portrait) addRect(r.portrait, "pv" + ("q" + i === selected ? " sel" : " ghost"), "q" + i === selected ? "顔" : "");
+      if (r.gender) addRect(r.gender, "pv" + ("g" + i === selected ? " sel" : " ghost"), "g" + i === selected ? "性別" : "");
     });
     if (preview) {
       $("pvon").checked = !!preview.enabled;
@@ -195,11 +203,13 @@
         <tr><td><input type="radio" name="sel" ${"p:" + k === selected ? "checked" : ""} data-sel="p:${k}"></td><td>${label}</td></tr>`).join("");
       if (pvSel) {  // 選出画面の項目を編集中は、補間した 6 つも表示
         addRect(preview.marker, "pv" + (selected === "p:marker" ? " sel" : ""), "マーカー");
-        for (const side of ["opp", "my"]) {
+        for (const side of ["opp", "my", "opp_gender", "my_gender"]) {
           const a = preview[side + "_first"], b = preview[side + "_last"];
+          if (!a || !b) continue;
           for (let i = 0; i < 6; i++) {
             const key = i === 0 ? side + "_first" : i === 5 ? side + "_last" : null;
-            addRect(lerp(a, b, i / 5), key ? "pv" + ("p:" + key === selected ? " sel" : "") : "pv ghost", key ? `${side === "opp" ? "相手" : "自分"}${i + 1}` : "");
+            const label = side.endsWith("gender") ? "" : `${side === "opp" ? "相手" : "自分"}${i + 1}`;
+            addRect(lerp(a, b, i / 5), key ? "pv" + ("p:" + key === selected ? " sel" : "") : "pv ghost", key ? label : "");
           }
         }
       }

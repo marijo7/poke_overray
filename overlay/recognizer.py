@@ -8,7 +8,10 @@ import time
 from .capture import create_capture
 from .config import save_config
 from .icons import ICON_DIR, IconDB, crop_with_margin
-from .names import NameMatcher, base_stats, form_abilities_ja, is_mega, mega_forms, normalize, resolve
+from .gender import crop as crop_rect
+from .gender import detect_gender
+from .names import (NameMatcher, base_stats, form_abilities_ja, gender_variant, is_mega, mega_forms, normalize,
+                    resolve)
 from .ocr import create_ocr, preprocess
 
 log = logging.getLogger(__name__)
@@ -55,7 +58,8 @@ class State:
                 info = resolve(entry["key"], self.usage)
         return info
 
-    def set_slot(self, region_id, ident=None, side="opp", source="auto"):
+    def set_slot(self, region_id, ident=None, side="opp", source="auto", specific=False):
+        """specific: 性別やフォルムまで確定した識別子 (パーティ内の同じ種族の表示も差し替える)"""
         with self.lock:
             if not ident:
                 self.slots.pop(region_id, None)
@@ -63,7 +67,7 @@ class State:
                 info = self._resolve(ident)
                 self.slots[region_id] = {"ident": info["key"], "species": info["species"], "side": side,
                                          "source": source, "updated": time.time()}
-                if is_mega(info["key"]):  # 手動でメガシンカ後の姿を選んだときもパーティ表示を差し替える
+                if is_mega(info["key"]) or specific:  # メガシンカ後・性別違いはパーティ表示も差し替える
                     mine = self.parties[side]
                     for i, m in enumerate(mine):
                         if self._resolve(m)["species"] == info["species"]:
@@ -257,6 +261,9 @@ class Recognizer(threading.Thread):
                 continue  # 特定済み
             key, score = self.state.icons.match(outer) if self.state.icons else (None, 0.0)
             self.state.debug[f"icon{i}"] = {"match": key, "score": round(score, 3)}
+            if key and score >= thr and pv.get("opp_gender_first"):
+                g = detect_gender(crop_rect(frame, _lerp(pv["opp_gender_first"], pv["opp_gender_last"], i, n)))
+                key = gender_variant(resolve(key, self.state.usage)["species"], g, self.state.usage) or key
             self.preview_opp[i] = key if key and score >= thr else "icon:" + uid
         opp = [m for m in self.preview_opp if m]
         if opp != self.state.parties["opp"]:
@@ -273,6 +280,9 @@ class Recognizer(threading.Thread):
                     continue
                 texts = self._ocr_rect(frame, _lerp(pv["my_first"], pv["my_last"], i, n), scale)
                 sp, _ = self.matcher.match(" ".join(texts)) if texts else (None, 0)
+                if sp and pv.get("my_gender_first"):
+                    g = detect_gender(crop_rect(frame, _lerp(pv["my_gender_first"], pv["my_gender_last"], i, n)))
+                    sp = gender_variant(sp, g, self.state.usage) or sp
                 self.preview_my[i] = sp
             mine = [m for m in self.preview_my if m]
             if len(mine) >= n - 2 and mine != self.state.parties["me"]:
@@ -304,9 +314,17 @@ class Recognizer(threading.Thread):
             count = count + 1 if prev == species else 1
             self.pending[r["id"]] = (species, count)
             current = self.state.slots.get(r["id"])
-            if count >= need and (current is None or current["species"] != species):
-                log.info("%s: %s (%.2f) ← %r", r["id"], species, score, text)
-                self.state.set_slot(r["id"], ident=species, side=r.get("side", "opp"), source="auto")
+            if count >= need:
+                # 性別でデータが違うポケモン (イエッサン等) は、名前の横の ♀/♂ でどちらか決める
+                gender = detect_gender(crop_rect(frame, r["gender"])) if r.get("gender") else None
+                gkey = gender_variant(species, gender, self.state.usage)
+                ident = gkey or species
+                changed = current is None or current["species"] != species
+                regender = (not changed and gkey and current["ident"] != gkey and not is_mega(current["ident"]))
+                if changed or regender:
+                    log.info("%s: %s%s (%.2f) ← %r", r["id"], species, f" [{gender}]" if gkey else "", score, text)
+                    self.state.set_slot(r["id"], ident=ident, side=r.get("side", "opp"), source="auto",
+                                        specific=bool(gkey))
             if r.get("portrait"):
                 self.check_mega(frame, r, cfg)
 

@@ -335,3 +335,22 @@ def nature_list_ja():
 
 def nature_by_ja(name: str):
     return next((n for n in nature_list_ja() if n["name"] == name), None)
+
+
+# ---- 性別違い (イエッサン♀ 等) ----
+
+def gender_variant(species_ja: str, gender, usage_db=None):
+    """種族と性別 ("F"/"M") から、性別で分かれているデータのキーを返す。分かれていなければ None。
+
+    採用率データでは メス = "<種族>-F" (Indeedee-F 等)、オス = 種族名そのもの (Indeedee)。
+    """
+    if not gender or usage_db is None:
+        return None
+    cands = [e for e in usage_db.entries.values() if e.get("species") == species_ja]
+    female = [e for e in cands if e["key"].endswith("-F")]
+    if not female:
+        return None  # 性別でデータが分かれていない
+    if gender == "F":
+        return female[0]["key"]
+    male = [e for e in cands if not e["key"].endswith("-F") and "-Mega" not in e["key"]]
+    return male[0]["key"] if male else female[0]["key"].rsplit("-F", 1)[0]
