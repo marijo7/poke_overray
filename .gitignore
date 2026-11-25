@@ -11,3 +11,5 @@ data/sprites/
 data/icons/
 # 対戦中の顔画像 (メガシンカ判定用に各自の環境で学習)
 data/portraits/
+# 手入力した性格の採用率
+data/natures.json
