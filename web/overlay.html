@@ -154,7 +154,7 @@
     return `<div class="sec-title">${title}</div>${rows}`;
   }
 
-  const img = (slot) => (opt.sprite && slot.sprite ? `<img src="/sprite/${slot.sprite}.png" alt="" onerror="this.remove()">` : "");
+  const img = (slot) => (opt.sprite && slot.sprite ? `<img src="/sprite/${slot.sprite}.png" alt="" onerror="window.__imgFailedAt=Date.now();this.remove()">` : "");
 
   const EMPTY = { moves: [], items: [], abilities: [], natures: [], spreads: [], mega: [] };
 
@@ -193,6 +193,10 @@
     try {
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
       if (window.applyOverlayFont) window.applyOverlayFont(st.display);  // 設定画面で選んだフォント
+      // ツールを更新した (表示用ファイルが変わった) ら、OBS 側でも自動で新しいページに読み込み直す
+      if (st.app_version) { if (window.__appVersion && window.__appVersion !== st.app_version) location.reload(); window.__appVersion = st.app_version; }
+      // 画像の取得に失敗していたら、数秒おきに描き直して取り直す
+      if (window.__imgFailedAt && Date.now() - window.__imgFailedAt > 4000) { window.__imgFailedAt = 0; lastSig = ""; }
       // ポケモンがいない枠も (見えないカードで) 場所を確保し、カードの位置がずれないようにする
       const slots = st.slots.filter((s) => (opt.slots ? opt.slots.includes(s.id) : s.side === "opp"));
       const sig = JSON.stringify([slots.map((s) => [s.id, s.display, s.sprite, s.mega, s.pokemon && s.pokemon.key, s.pokemon && s.pokemon.natures]), st.history, st.usage_meta]);

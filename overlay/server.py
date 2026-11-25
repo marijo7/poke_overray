@@ -24,6 +24,35 @@ SPRITE_URLS = [
 ]
 log = logging.getLogger(__name__)
 _sprite_lock = threading.Lock()
+_sprite_failed = {}       # pid -> 最後に失敗した時刻 (失敗が続く画像を何度も取りに行かない)
+_sprite_inflight = set()  # 先読み中の pid
+
+
+def web_version() -> str:
+    """表示用ファイル (web/) の更新時刻から作る版番号。変わったら OBS 側のページが自動で読み込み直す。"""
+    import hashlib
+    h = hashlib.md5()
+    for f in sorted(WEB_DIR.glob("*.*")):
+        h.update(f"{f.name}:{f.stat().st_mtime_ns}".encode())
+    return h.hexdigest()[:10]
+
+
+def prefetch_sprites(pids):
+    """パーティ等で使う画像を裏で取得しておく (表示するときに待たせない・取りこぼさない)。"""
+    import time
+    todo = [p for p in pids if p and not (SPRITE_DIR / f"{p}.png").exists() and p not in _sprite_inflight
+            and time.time() - _sprite_failed.get(p, 0) > 30]
+    if not todo:
+        return
+    _sprite_inflight.update(todo)
+
+    def run():
+        for p in todo:
+            try:
+                get_sprite(p)
+            finally:
+                _sprite_inflight.discard(p)
+    threading.Thread(target=run, daemon=True).start()
 
 
 def get_sprite(pid: int):
@@ -43,8 +72,16 @@ def get_sprite(pid: int):
                 continue
             SPRITE_DIR.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
+            _sprite_failed.pop(pid, None)
             return data
+    import time
+    if pid not in _sprite_failed:
+        log.warning("ポケモンの画像を取得できませんでした (id=%s)。インターネット接続を確認してください。", pid)
+    _sprite_failed[pid] = time.time()
     return None
+
+
+WEB_VERSION = web_version()
 
 
 class App:
@@ -89,6 +126,9 @@ def make_handler(app: App):
             if path == "/api/state":
                 snap = app.state.snapshot(app.cfg["regions"])
                 snap["display"] = app.cfg.get("display", {})
+                snap["app_version"] = WEB_VERSION
+                prefetch_sprites([m.get("sprite") for ms in snap["parties"].values() for m in ms]
+                                 + [s.get("sprite") for s in snap["slots"]])
                 return self._json(snap)
             if path == "/api/fonts":  # web/fonts に置かれたフォントファイル
                 d = WEB_DIR / "fonts"

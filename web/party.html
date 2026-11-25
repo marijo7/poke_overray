@@ -87,7 +87,7 @@
       const m = members[i];
       if (!m) { out.push(`<div class="tile"><div class="ph">?</div><div class="nm">&nbsp;</div></div>`); continue; }
       const isNew = !prevKeys[key].includes(m.key);
-      const img = m.sprite ? `<img src="/sprite/${m.sprite}.png" alt="" onerror="this.outerHTML='<div class=ph>?</div>'">`
+      const img = m.sprite ? `<img src="/sprite/${m.sprite}.png" alt="" onerror="window.__imgFailedAt=Date.now();this.outerHTML='<div class=ph>?</div>'">`
         : m.icon ? `<img class="raw" src="/api/icon/${esc(m.icon)}.png" alt="">` : `<div class="ph">?</div>`;
       const nm = m.icon ? "&nbsp;" : esc(m.display);
       out.push(`<div class="tile${m.active ? " active" : ""}${isNew ? " new" : ""}" title="${esc(m.display)}">${img}<div class="nm">${nm}</div></div>`);
@@ -104,6 +104,10 @@
     try {
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
       if (window.applyOverlayFont) window.applyOverlayFont(st.display);  // 設定画面で選んだフォント
+      // ツールを更新した (表示用ファイルが変わった) ら、OBS 側でも自動で新しいページに読み込み直す
+      if (st.app_version) { if (window.__appVersion && window.__appVersion !== st.app_version) location.reload(); window.__appVersion = st.app_version; }
+      // 画像の取得に失敗していたら、数秒おきに描き直して取り直す
+      if (window.__imgFailedAt && Date.now() - window.__imgFailedAt > 4000) { window.__imgFailedAt = 0; lastSig = ""; }
       const p = st.parties;
       const sig = JSON.stringify(p);
       if (sig !== lastSig) {
