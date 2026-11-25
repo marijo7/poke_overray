@@ -22,7 +22,7 @@ _FORM_JA = {
     "Wash": "ウォッシュ", "Heat": "ヒート", "Frost": "フロスト", "Fan": "スピン", "Mow": "カット",
     "F": "♀", "M": "♂", "Female": "♀", "Male": "♂", "Therian": "れいじゅう", "Eternal": "えいえんのはな", "Bloodmoon": "アカツキ",
     "Hearthflame": "かまどのめん", "Wellspring": "いどのめん", "Cornerstone": "いしずえのめん",
-    "Four": "4ひきかぞく", "Three": "3びきかぞく", "Fancy": "ファンシーなもよう", "Dusk": "たそがれ",
+    "Four": "4ひきかぞく", "Three": "3びきかぞく", "Fancy": "",  # ビビヨンの模様は対戦に関係しないので省く "Dusk": "たそがれ",
     "Midnight": "まよなか", "Midday": "まひる", "Aqua": "ウォーター", "Blaze": "ブレイズ", "Combat": "コンバット",
     "Shield": "シールド", "Blade": "ブレード", "Origin": "オリジン", "Incarnate": "けしん",
 }
@@ -92,8 +92,8 @@ def showdown_to_ja(name: str):
         return ja, ja
     if form[0] == "Mega":
         return "メガ" + ja + "".join(form[1:]), ja
-    label = "-".join(_FORM_JA.get(f, f) for f in form)
-    return f"{ja}({label})", ja
+    label = "-".join(x for x in (_FORM_JA.get(f, f) for f in form) if x)
+    return (f"{ja}({label})" if label else ja), ja
 
 
 def translate(kind: str, en: str) -> str:
