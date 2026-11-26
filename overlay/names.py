@@ -199,8 +199,7 @@ def resolve(ident: str, usage_db=None):
     if ident.endswith(("#F", "#M")):  # 見た目にオス・メスの違いがあるポケモンの性別 (例: Pyroar#F = メスのカエンジシ)
         info = resolve(ident[:-2], usage_db)
         if info and info.get("sprite") and has_gender_diff(info["species"]) and ident.endswith("#F"):
-            disp = info["display"] if "♀" in info["display"] else info["display"] + "(♀)"
-            info = dict(info, key=ident, display=disp, sprite=f"{info['sprite']}f", gender="F")  # 画像はメスの姿
+            info = dict(info, key=ident, sprite=f"{info['sprite']}f", gender="F")  # 画像だけメスの姿 (名前はそのまま)
         elif info:
             info = dict(info, key=ident, gender=ident[-1])
         return info

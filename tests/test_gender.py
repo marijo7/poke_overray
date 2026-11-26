@@ -72,7 +72,7 @@ class TestVisualGenderDifference(unittest.TestCase):
         self.assertEqual(with_gender("Pyroar", "カエンジシ", "M"), "Pyroar")     # オスは通常の画像
         self.assertEqual(with_gender("Armarouge", "グレンアルマ", "F"), "Armarouge")  # 見た目に違いが無い
         r = resolve("Pyroar#F")
-        self.assertEqual((r["sprite"], r["display"], r["species"]), ("668f", "カエンジシ(♀)", "カエンジシ"))
+        self.assertEqual((r["sprite"], r["display"], r["species"]), ("668f", "カエンジシ", "カエンジシ"))  # 名前に性別は付けない
 
     def test_usage_and_stats_shared(self):
         st = State(usage())
