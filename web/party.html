@@ -13,7 +13,7 @@
     names=0            名前を非表示
     label=0            「自分」「相手」の見出しを非表示
     font=メイリオ / gfont=M PLUS Rounded 1c / fontfile=MyFont.ttf   フォントの変更 (font.js 参照)
-    scale=1.2 / theme=light
+    scale=1.2 / theme=light   (ソースの大きさに収まらないときは自動で縮小)
 -->
 <style>
   :root {
@@ -101,6 +101,19 @@
     return `<div class="party ${key}">${showLabel ? `<div class="title">${title}</div>` : ""}<div class="tiles">${tiles(members, key)}</div></div>`;
   }
 
+  // OBS のソースの大きさ (幅・高さ) に収まらないときは、見切れないように全体を縮小する
+  const userScale = parseFloat(q.get("scale") || "1") || 1;
+  function fitToWindow() {
+    const de = document.documentElement;
+    de.style.setProperty("--scale", 1);
+    root.style.width = "max-content";  // 左右に広げる前の、中身が必要とする大きさを測る
+    const r = root.getBoundingClientRect();
+    root.style.width = "";
+    const z = Math.min(userScale, window.innerWidth / Math.max(1, r.width), window.innerHeight / Math.max(1, r.height));
+    de.style.setProperty("--scale", Math.max(0.2, z));
+  }
+  window.addEventListener("resize", fitToWindow);
+
   let lastSig = "";
   async function tick() {
     try {
@@ -119,6 +132,7 @@
         if (side !== "me") html += party("opp", "相手", p.opp);
         root.innerHTML = html;
         prevKeys = { me: p.me.map((m) => m.key), opp: p.opp.map((m) => m.key) };
+        fitToWindow();
       }
     } catch (e) { /* サーバー停止中 */ }
     setTimeout(tick, 500);
