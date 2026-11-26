@@ -12,7 +12,7 @@
     nature=0           性格を非表示
     natures=2          性格の表示件数
     spreads=0          能力ポイント配分の表示件数 (既定は非表示)
-    moves=4 items=2 abilities=2   表示件数 (0 で非表示)。既定は 2 枚縦に並べて 1080px に収まる件数
+    moves=6 items=2 abilities=2   表示件数 (0 で非表示)。行数が多いと 1 行を細くして、カードの大きさは変えない
     w=300 h=600        カードの幅・高さ (px) を固定。省略時も、データの量によらず同じ大きさになるよう行数を固定している
     layout=row         カードを横並びにする (既定は縦並び)
     history=1          この対戦で見た相手の一覧を表示
@@ -82,7 +82,7 @@
   .mega { height: 16px; line-height: 16px; }
   .mega b { line-height: 16px; }
   .sec-title { height: 14px; line-height: 14px; }
-  .row-item { height: 22px; line-height: 22px; box-sizing: border-box; }
+  .row-item { height: var(--row-h, 22px); line-height: var(--row-h, 22px); font-size: var(--row-fs, 15px); box-sizing: border-box; }
   .stats { height: 34px; }
   .credit { height: 12px; line-height: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card.ghost { visibility: hidden; animation: none; }
@@ -105,7 +105,7 @@
   const q = new URLSearchParams(location.search);
   const opt = {
     slots: q.get("slot") ? q.get("slot").split(",") : null,
-    moves: +(q.get("moves") ?? 4),
+    moves: +(q.get("moves") ?? 6),
     items: +(q.get("items") ?? 2),
     abilities: +(q.get("abilities") ?? 2),
     sprite: q.get("sprite") !== "0",
@@ -116,6 +116,16 @@
   };
   if (q.get("w")) document.documentElement.style.setProperty("--card-w", parseInt(q.get("w"), 10) + "px");
   if (q.get("h")) document.documentElement.style.setProperty("--card-h", parseInt(q.get("h"), 10) + "px");
+  // 行数が多いときは 1 行を細くして、カードの大きさを 10 行ぶん (技 4・持ち物 2・特性 2・性格 2) のときと同じに保つ
+  {
+    const rows = opt.moves + opt.items + opt.abilities + (opt.nature ? opt.natureCount + opt.spreads : 0);
+    if (rows > 10) {
+      const step = 240 / rows;              // 10 行 × 24px (行 22px + 間 2px) の高さに収める
+      const h = step - 2;
+      document.documentElement.style.setProperty("--row-h", h + "px");
+      document.documentElement.style.setProperty("--row-fs", Math.max(11, Math.min(15, Math.round(h * 0.72))) + "px");
+    }
+  }
   const LABELS = ["H", "A", "B", "C", "D", "S"];
 
   function statsBlock(stats) {
