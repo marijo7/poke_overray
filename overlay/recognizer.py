@@ -283,6 +283,7 @@ class Recognizer(threading.Thread):
         self.pending_nick = {}      # region id -> 未登録ニックネームを続けて読んだ回数
         self.layout_votes = {}      # 他の画面レイアウトで選出画面が読めた回数
         self.region_votes = {}      # 対戦画面の別の名前欄の位置で多く読めた回数
+        self.autofit_job = None     # 設定画面から頼まれた範囲の自動調整
         self.last_layout_try = 0.0
         self.battle_seen = False    # 前の選出画面のあと、対戦画面でポケモンを読み取ったか (= 次の選出画面は新しい対戦)
         self.my_icon_cache = {}     # 選出画面の自分のポケモンの絵の判定結果 (対戦ごと)
@@ -314,6 +315,16 @@ class Recognizer(threading.Thread):
         perf = self.state.perf
         while not self.stop_event.is_set() and not self.reload_event.is_set():
             cfg = self.get_config()
+            job = self.autofit_job
+            if job is not None:  # 設定画面の「自動で合わせる」(OCR を使うので、認識と同じスレッドで動かす)
+                self.autofit_job = None
+                try:
+                    job["result"] = self.autofit(self.capture.grab(), cfg)
+                except Exception as e:
+                    log.exception("自動調整に失敗")
+                    job["result"] = {"ok": False, "messages": [f"エラー: {e}"]}
+                job["event"].set()
+                continue
             if self.state.status.get("paused"):
                 self.stop_event.wait(0.5)
                 continue
@@ -336,6 +347,54 @@ class Recognizer(threading.Thread):
             self.state.status["fps"] = round(1 / max(now - last, 1e-3), 1)
             last = now
             self.stop_event.wait(max(0.0, cfg.get("interval_sec", 0.5) - (t2 - t0)))
+
+    def request_autofit(self, timeout=120):
+        """設定画面から: 認識スレッドに自動調整を頼んで、終わるまで待つ"""
+        job = {"event": threading.Event(), "result": None}
+        self.autofit_job = job
+        if not job["event"].wait(timeout):
+            self.autofit_job = None
+            return {"ok": False, "messages": ["時間内に終わりませんでした (画面の取得が止まっていないか確認してください)"]}
+        return job["result"]
+
+    def autofit(self, frame, cfg):
+        """今の画面から読み取り範囲を合わせて保存する。今のプリセットで合わなければ、他のプリセットを基準にも試す。"""
+        from .autofit import autofit_frame
+        from .config import PRESETS, apply_preset
+        scale = cfg["ocr"].get("scale", getattr(self.ocr, "default_scale", 2.0))
+        # どのプリセット (スマホ版 / Switch 版) を基準にしても目印には合うので、全部試して確からしい方を採る
+        layouts = [cfg.get("layout")] + [k for k in PRESETS if k != cfg.get("layout")]
+        res, best = None, None
+        for lay in layouts:
+            if lay not in PRESETS or not PRESETS[lay].get("fit"):
+                continue
+            r = autofit_frame(frame, lay, self.ocr, self.matcher, self.state.nicknames, scale)
+            log.info("自動調整 (%s 基準, 確からしさ %.2f): %s", PRESETS[lay]["label"], r.get("quality", 0),
+                     " / ".join(r["messages"]))
+            if res is None or (r["ok"], r.get("quality", 0)) > (res["ok"], res.get("quality", 0)):
+                res, best = r, lay
+        if not res or not res["ok"]:
+            return res or {"ok": False, "messages": ["基準の配置がありません"]}
+        if best != cfg.get("layout"):
+            # 別のプリセットに切り替えても、もう片方の画面で自動調整した範囲はそのまま使う
+            keep_pv = copy.deepcopy(cfg["preview"]) if cfg.get("preview_fitted") else None
+            keep_rg = copy.deepcopy(cfg["regions"]) if cfg.get("regions_fitted") else None
+            apply_preset(cfg, best)
+            if keep_pv and not res.get("preview"):
+                cfg["preview"], cfg["preview_fitted"] = keep_pv, True
+            if keep_rg and not res.get("regions"):
+                cfg["regions"], cfg["regions_fitted"] = keep_rg, True
+        if res.get("preview"):
+            cfg["preview"].update(res["preview"])
+            cfg["preview_fitted"] = True
+            for it in self.marker_db.list():  # マーカーの位置が変わったので、覚えた画像は使えない
+                if it["key"] == best:
+                    self.marker_db.remove(it["id"])
+        if res.get("regions"):
+            cfg["regions"] = res["regions"]
+            cfg["regions_fitted"] = True  # 自動調整した位置は、別の配置への自動切り替えをしない
+        save_config(cfg)
+        return res
 
     def _ocr_rect(self, frame, rect, scale):
         W, H = frame.size
@@ -805,6 +864,8 @@ class Recognizer(threading.Thread):
         preset = PRESETS.get(cfg.get("layout")) or {}
         sets = [preset.get("regions")] + list(preset.get("regions_alt") or [])
         sets = [s for s in sets if s and [(r["x"], r["y"]) for r in s] != [(r["x"], r["y"]) for r in cfg["regions"]]]
+        if cfg.get("regions_fitted"):
+            return reads  # 設定画面で自動調整した位置を使う
         strong = self._strong(reads)
         now = time.time()
         if not sets or strong >= len(reads) or now - self.last_layout_try < 5:  # 全部読めていれば試さない (5 秒に 1 回まで)

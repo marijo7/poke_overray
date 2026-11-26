@@ -62,6 +62,10 @@ PRESETS = {
     # スマホ版 (2556x1179 で計測。画面の端に余白がある機種。余白の無い機種用は regions_alt)
     "phone": {
         "label": "スマホ版",
+        # 自動調整 (overlay/autofit.py) の基準: 計測した画面の大きさと、そこでの目印の位置
+        "fit": {"ref_size": [2556, 1179], "battle_ref_size": [2556, 1179],
+                "opp_panel": {"x0": 0.7567, "x1": 0.8838, "top0": 0.117, "pitch": 0.117},
+                "my_name": {"x0": 0.1482, "cy0": 0.1476}, "marker": {"x1": 0.5347, "cy": 0.2384}},
         "regions": [
             {"id": "opp1", "label": "相手 左", "side": "opp", **_r(0.6385, 0.0483, 0.0822, 0.0399),
              "portrait": _r(0.5994, 0.0466, 0.0391, 0.0933), "gender": _r(0.7207, 0.0551, 0.0149, 0.0288)},
@@ -99,6 +103,9 @@ PRESETS = {
     # Switch 版 (1920x1080 で計測)
     "switch": {
         "label": "Switch 版",
+        "fit": {"ref_size": [1920, 1080], "battle_ref_size": [1920, 1080],
+                "opp_panel": {"x0": 0.8109, "x1": 0.9651, "top0": 0.1435, "pitch": 0.1167},
+                "my_name": {"x0": 0.0736, "cy0": 0.1726}, "marker": {"x1": 0.542, "cy": 0.2634}},
         "regions": [
             {"id": "opp1", "label": "相手 左", "side": "opp", **_r(0.6224, 0.0481, 0.1198, 0.0398),
              "portrait": _r(0.5729, 0.0352, 0.0417, 0.1111), "gender": _r(0.7474, 0.0528, 0.0156, 0.0278)},
@@ -128,6 +135,8 @@ def apply_preset(cfg: dict, name: str) -> dict:
     preset = PRESETS[name]
     cfg["layout"] = name
     cfg["regions"] = copy.deepcopy(preset["regions"])
+    cfg.pop("regions_fitted", None)
+    cfg.pop("preview_fitted", None)
     cfg.setdefault("preview", {}).update(copy.deepcopy(preset["preview"]))
     return cfg
 

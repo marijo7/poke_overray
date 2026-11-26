@@ -59,6 +59,23 @@ class WindowsOcr:
     async def _recognize(self, bmp):
         return await self.engine.recognize_async(bmp)
 
+    def detect(self, img: Image.Image):
+        """画面全体の文字を位置付きで読む (範囲の自動調整用)。戻り値: [(文字列, (x0, y0, x1, y1))] (px)"""
+        img = img.convert("RGB")
+        r, g, b = img.split()
+        raw = Image.merge("RGBA", (b, g, r, Image.new("L", img.size, 255))).tobytes()
+        w = self._DataWriter()
+        w.write_bytes(raw)
+        bmp = self._SoftwareBitmap.create_copy_from_buffer(w.detach_buffer(), self._bgra8, img.width, img.height)
+        result = self.loop.run_until_complete(self._recognize(bmp))
+        out = []
+        for line in result.lines:
+            rects = [wd.bounding_rect for wd in line.words]
+            if rects:
+                out.append((line.text, (min(r.x for r in rects), min(r.y for r in rects),
+                                        max(r.x + r.width for r in rects), max(r.y + r.height for r in rects))))
+        return out
+
 
 class TesseractOcr:
     name = "Tesseract"
@@ -81,6 +98,20 @@ class TesseractOcr:
             if t:
                 texts.append(t)
         return texts
+
+    def detect(self, img):
+        d = self.pt.image_to_data(img.convert("RGB"), lang=self.lang, output_type=self.pt.Output.DICT)
+        lines = {}
+        for i, t in enumerate(d["text"]):
+            if t.strip():
+                k = (d["block_num"][i], d["par_num"][i], d["line_num"][i])
+                x0, y0, x1, y1 = d["left"][i], d["top"][i], d["left"][i] + d["width"][i], d["top"][i] + d["height"][i]
+                if k in lines:
+                    tt, (a, b, c, e) = lines[k]
+                    lines[k] = (tt + t, (min(a, x0), min(b, y0), max(c, x1), max(e, y1)))
+                else:
+                    lines[k] = (t, (x0, y0, x1, y1))
+        return list(lines.values())
 
 
 class RapidOcr:
@@ -111,6 +142,8 @@ class RapidOcr:
         elif device != "cpu":
             raise ValueError(f"ocr.device は cpu / dml / cuda のいずれか: {device}")
         self.engine = RapidOCR(params=params)
+        self._params = params
+        self._det_engine = None
         self.engine(np.zeros((48, 320, 3), np.uint8))  # モデル読み込み (初回はダウンロード)
         self.name = f"RapidOCR ({self._provider()})"
 
@@ -129,6 +162,19 @@ class RapidOcr:
     def recognize(self, img):
         out = self.engine(self._np.array(img.convert("RGB")))
         return [t for t in (out.txts or ()) if t]
+
+    def detect(self, img):
+        """画面全体の文字を位置付きで読む (範囲の自動調整用。文字領域検出のモデルは初回だけ読み込む)。"""
+        if self._det_engine is None:
+            from rapidocr import RapidOCR
+            self._det_engine = RapidOCR(params={**self._params, "Global.use_det": True})
+        out = self._det_engine(self._np.array(img.convert("RGB")))
+        res = []
+        for box, t in zip(out.boxes if out.boxes is not None else (), out.txts or ()):
+            if t:
+                xs, ys = [p[0] for p in box], [p[1] for p in box]
+                res.append((t, (min(xs), min(ys), max(xs), max(ys))))
+        return res
 
 
 def create_ocr(cfg: dict):

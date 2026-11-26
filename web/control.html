@@ -90,6 +90,11 @@
         <span>ゲーム:</span><select id="preset"></select><button id="presetapply">この画面用の範囲にする</button>
         <span id="presetmsg" class="hint"></span>
       </div>
+      <div class="row" style="margin-bottom:8px">
+        <button id="autofit">今の画面から自動で合わせる</button>
+        <span class="hint" style="margin:0">選出画面・対戦画面を表示した状態でそれぞれ 1 回ずつ押してください (数秒〜十数秒かかります)</span>
+      </div>
+      <div id="autofitmsg" class="hint" style="white-space:pre-line"></div>
       <div id="stage"><img id="frame" alt=""><div class="noframe" id="noframe">画面を取得できていません</div></div>
       <p class="hint">下の一覧で領域を選び、画像上をドラッグすると範囲を設定できます。「名前」は<b>名前の文字だけ</b>が入るように、「顔」は名前の左の小さなポケモンの絵（メガシンカの判定に使用）、「性別」は名前の右の ♀/♂ マーク（イエッサン等の性別違いの判定に使用）を囲みます。調整したら「保存」を押してください。</p>
     </div>
@@ -473,6 +478,21 @@
     const r = await post("/api/preset", { name: $("preset").value });
     if (r.ok) { regions = r.regions; preview = r.preview; dirty = false; renderRegions(); $("presetmsg").textContent = "切り替えました"; }
     setTimeout(() => ($("presetmsg").textContent = ""), 2500);
+  };
+
+  // ---- 範囲の自動調整 ----
+  $("autofit").onclick = async () => {
+    if (dirty && !confirm("保存していない範囲の変更があります。自動調整で置き換えてよろしいですか？")) return;
+    const btn = $("autofit");
+    btn.disabled = true; $("autofitmsg").textContent = "合わせています…";
+    try {
+      const r = await post("/api/autofit");
+      const head = r.ok ? `${r.screen}の範囲を合わせました (${r.layout_label})` : `${r.screen || "画面"}の範囲を合わせられませんでした`;
+      $("autofitmsg").textContent = [head, ...(r.messages || []).map((m) => "・" + m),
+        r.ok ? "画像の枠が名前・顔・性別マークに合っているか確認してください" : ""].filter(Boolean).join("\n");
+      if (r.ok) { regions = r.regions; preview = r.preview; dirty = false; renderRegions(); }
+    } catch (e) { $("autofitmsg").textContent = "失敗しました: " + e; }
+    btn.disabled = false;
   };
 
   // ---- パーティ ----

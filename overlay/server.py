@@ -238,6 +238,8 @@ def make_handler(app: App):
                         if isinstance(r.get(sub), dict):
                             item[sub] = {k: min(1.0, max(0.0, float(r[sub][k]))) for k in ("x", "y", "w", "h")}
                     clean.append(item)
+                if [(r["x"], r["y"]) for r in clean] != [(r["x"], r["y"]) for r in app.cfg["regions"]]:
+                    app.cfg["regions_fitted"] = True  # 手で合わせた位置は、別の配置への自動切り替えをしない
                 app.cfg["regions"] = clean
                 save_config(app.cfg)
                 return self._json({"ok": True, "regions": clean, "preview": app.cfg.get("preview")})
@@ -281,6 +283,13 @@ def make_handler(app: App):
             if path == "/api/learn_marker":  # 今の画面を選出画面として覚える
                 ok = app.recognizer is not None and app.recognizer.learn_marker()
                 return self._json({"ok": bool(ok)})
+            if path == "/api/autofit":  # 今の画面から読み取り範囲を自動で合わせる
+                if app.recognizer is None:
+                    return self._json({"ok": False, "messages": ["画面認識を止めて起動しているため使えません"]})
+                r = app.recognizer.request_autofit()
+                r.update(regions=app.cfg["regions"], preview=app.cfg.get("preview"),
+                         layout_label=PRESETS.get(app.cfg.get("layout"), {}).get("label", ""))
+                return self._json(r)
             if path == "/api/forget_marker":
                 if app.recognizer is not None:
                     for it in app.recognizer.marker_db.list():
