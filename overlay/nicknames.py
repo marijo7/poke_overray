@@ -62,8 +62,8 @@ class NicknameDB:
             self._save()
             return True
 
-    def match(self, text: str, min_ratio: float = 0.8):
-        """OCR 文字列 → 登録済みのポケモン。OCR の誤読 (1 文字違い・余計な記号) も許容する。"""
+    def match(self, text: str, min_ratio: float = 0.75):
+        """OCR 文字列 → 登録済みのポケモン。OCR の誤読 (4 文字中 1 文字違い・余計な記号) も許容する。"""
         k = nick_key(text)
         if len(k) < 2:
             return None

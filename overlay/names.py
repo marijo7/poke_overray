@@ -135,6 +135,11 @@ class NameMatcher:
         for n in self.sorted_norms:
             if len(n) >= 3 and n in t:
                 return self.by_norm[n], 0.95
+        # 名前の一部だけ読めたケース (「マンダ９選」→ ボーマンダ): 3 文字以上のカタカナが 1 匹の名前にだけ含まれる
+        for run in sorted(re.findall(r"[ァ-ヶー]{3,}", t), key=len, reverse=True):
+            hits = {self.by_norm[n] for n in self.sorted_norms if run in n}
+            if len(hits) == 1:
+                return hits.pop(), 0.88
         ratio = lambda a, b: difflib.SequenceMatcher(None, a, b).ratio()
         # 取り違えやすい文字を同一視すると一致 (グレソアルマ → グレンアルマ, ビピヨソ → ビビヨン)
         lt = loose(t)

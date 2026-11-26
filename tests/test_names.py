@@ -83,6 +83,16 @@ class TestNames(unittest.TestCase):
         self.assertEqual(normalize("ｶﾞﾌﾞﾘｱｽ"), "ガブリアス")
 
 
+
+class TestPartialName(unittest.TestCase):
+    def test_partial_katakana_is_unique_name(self):
+        """名前の左が欠けて読めた (「マンダ９選」) → 1 匹にしか含まれない並びならそのポケモン"""
+        m = NameMatcher()
+        self.assertEqual(m.match("マンダ９選")[0], "ボーマンダ")
+        self.assertIsNone(m.match("Yソ,")[0])
+        self.assertIsNone(m.match("やまだ")[0])
+
+
 if __name__ == "__main__":
     unittest.main()
 

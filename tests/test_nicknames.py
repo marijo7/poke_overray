@@ -99,3 +99,24 @@ class TestIdentifyByChampionGuard(unittest.TestCase):
         st.set_party("me", ["nick:もちまる", "イエッサン(♀)"])
         from PIL import Image
         self.assertIsNone(rec.identify_by_champion(Image.new("RGB", (100, 100)), r))
+
+
+class TestUnknownNickMerge(unittest.TestCase):
+    def test_one_char_misread_is_merged(self):
+        st = State(usage(), nicknames=NicknameDB(Path(tempfile.mkdtemp()) / "n.json"))
+        st.add_unknown_nick("山田二郎", "me")
+        st.add_unknown_nick("山田三郎", "me")  # OCR の読み違い
+        self.assertEqual([v["nick"] for v in st.unknown_nicks.values()], ["山田二郎"])
+
+    def test_registered_nick_tolerates_misread(self):
+        db = NicknameDB(Path(tempfile.mkdtemp()) / "n.json")
+        db.set("山田二郎", "オオニューラ")
+        self.assertEqual(db.match("山田三郎"), "オオニューラ")
+
+
+class TestBattleLayoutAlt(unittest.TestCase):
+    def test_phone_has_alternative_battle_regions(self):
+        alts = PRESETS["phone"]["regions_alt"]
+        self.assertTrue(alts)
+        for regions in alts:
+            self.assertEqual([r["id"] for r in regions], [r["id"] for r in PRESETS["phone"]["regions"]])

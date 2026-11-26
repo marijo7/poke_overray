@@ -1,4 +1,5 @@
 """画面を定期的に取得し、各領域の OCR → ポケモン名特定 → 状態更新を行う。"""
+import copy
 import difflib
 import io
 import logging
@@ -132,7 +133,13 @@ class State:
     def add_unknown_nick(self, nick, side, cands=None):
         """cands: 絵から見て近いポケモン (設定画面で候補のボタンにする)"""
         with self.lock:
-            item = self.unknown_nicks.setdefault(nick_key(nick), {"nick": clean_nick(nick), "side": side, "cands": []})
+            k = nick_key(nick)
+            for k2, v in self.unknown_nicks.items():  # 1 文字だけ読み違えた同じニックネーム (田所浩二 / 田所浩三) はまとめる
+                if k2 != k and v["side"] == side and len(k) >= 3 and \
+                        difflib.SequenceMatcher(None, k, k2).ratio() >= 0.7:
+                    k = k2
+                    break
+            item = self.unknown_nicks.setdefault(k, {"nick": clean_nick(nick), "side": side, "cands": []})
             if cands:
                 item["cands"] = list(cands)
 
@@ -275,6 +282,8 @@ class Recognizer(threading.Thread):
         self.champ = ChampionIcons()  # Champions のポケモン画像 (選出画面のアイコンの推定用)
         self.pending_nick = {}      # region id -> 未登録ニックネームを続けて読んだ回数
         self.layout_votes = {}      # 他の画面レイアウトで選出画面が読めた回数
+        self.region_votes = {}      # 対戦画面の別の名前欄の位置で多く読めた回数
+        self.last_layout_try = 0.0
         self.battle_seen = False    # 前の選出画面のあと、対戦画面でポケモンを読み取ったか (= 次の選出画面は新しい対戦)
         self.my_icon_cache = {}     # 選出画面の自分のポケモンの絵の判定結果 (対戦ごと)
         self.marker_db = IconDB(ICON_DIR.parent / "markers")  # 選出画面のマーカーの画像 (画面レイアウトごと)
@@ -676,26 +685,12 @@ class Recognizer(threading.Thread):
         self.state.status["screen"] = "対戦"
         W, H = frame.size
         need = max(1, int(cfg.get("confirm_frames", 2)))
-        for r in cfg["regions"]:
-            box = (int(r["x"] * W), int(r["y"] * H), int((r["x"] + r["w"]) * W), int((r["y"] + r["h"]) * H))
-            if box[2] - box[0] < 4 or box[3] - box[1] < 4:
+        reads = [(r, self.read_region(frame, r, scale)) for r in cfg["regions"]]
+        reads = self.check_battle_layout(frame, cfg, scale, reads)
+        for r, read in reads:
+            if read is None:
                 continue
-            crop = preprocess(frame.crop(box), scale)
-            texts = self.ocr.recognize(crop)
-            species, score, text = None, 0.0, " / ".join(texts)
-            for t in texts:
-                sp, sc = self.matcher.match(t)
-                if sp and sc > score:
-                    species, score = sp, sc
-            if not species and not (texts and self.state.nicknames.match(text)):
-                # 読めなかったら、白い文字だけを取り出してもう一度 (選出画面の文字で効果があった方法)
-                texts2 = self.ocr.recognize(self.white_text(crop))
-                for t in texts2:
-                    sp, sc = self.matcher.match(t)
-                    if sp and sc > score:
-                        species, score = sp, sc
-                if species or (texts2 and not texts):
-                    texts, text = texts2, " / ".join(texts2)
+            species, score, texts, text = read
             hint, via = None, "name"
             if not species and texts and looks_like_name(text):
                 # ポケモン名ではない = ニックネーム。登録済みならそれ、無ければ顔画像で判定
@@ -736,10 +731,100 @@ class Recognizer(threading.Thread):
                     log.info("%s: %s%s (%.2f) ← %r", r["id"], species, f" [{gender}]" if gkey else "", score, text)
                     self.state.set_slot(r["id"], ident=ident, side=r.get("side", "opp"), source="auto",
                                         specific=bool(gkey))
+                    if r.get("side", "opp") == "opp":
+                        self.assign_seen_to_icon(ident)
                 if via in ("name", "nickname") and r.get("portrait"):
                     self.learn_base_portrait(frame, r, gkey or species)
             if r.get("portrait"):
                 self.check_mega(frame, r, cfg)
+
+    def assign_seen_to_icon(self, key):
+        """対戦画面に出てきた相手のポケモンが、選出画面の未登録アイコン (?) のどれかを決めて覚える。
+        (未登録が 1 つだけなら set_slot で決まる。2 つ以上のときは、タイプが合うもの・絵が一番似ているもの)"""
+        st, usage = self.state, self.state.usage
+        info = resolve(key, usage)
+        key = info["key"]  # 日本語名 → 採用率データのキー (Champions の画像もこのキー)
+        party = list(st.parties["opp"])
+        if any(resolve(m, usage)["species"] == info["species"] for m in party if not m.startswith("icon:")):
+            return
+        uids = [m[5:] for m in party if m.startswith("icon:")]
+        if len(uids) < 2:
+            return
+        types = types_of(key, usage)
+        uids = [u for u in uids if not (st.icon_guess.get(u) or {}).get("types") or st.icon_guess[u]["types"] == types]
+        if len(uids) == 1:
+            st.label_icon(uids[0], key)
+            log.info("対戦に出てきた %s を、タイプの合う未登録アイコンとして登録", info["display"])
+            return
+        if not uids or not self.champ.available([key]):
+            return
+        scored = []
+        for u in uids:
+            crop = st.icon_crops.get(u)
+            ranked = self.champ.rank(crop, [key]) if crop is not None else []
+            if ranked:
+                scored.append(((ranked[0][1] + ranked[0][2]) / 2, u))
+        scored.sort(reverse=True)
+        if scored and (len(scored) < 2 or scored[0][0] - scored[1][0] >= 0.05):
+            st.label_icon(scored[0][1], key)
+            log.info("対戦に出てきた %s を、絵の似ている未登録アイコンとして登録 (%.2f)", info["display"], scored[0][0])
+
+    def read_region(self, frame, r, scale):
+        """対戦画面の名前欄を読む。戻り値: (種族 or None, スコア, 読めた文字列のリスト, つないだ文字列) / 範囲が小さすぎれば None"""
+        W, H = frame.size
+        box = (int(r["x"] * W), int(r["y"] * H), int((r["x"] + r["w"]) * W), int((r["y"] + r["h"]) * H))
+        if box[2] - box[0] < 4 or box[3] - box[1] < 4:
+            return None
+        crop = preprocess(frame.crop(box), scale)
+        texts = self.ocr.recognize(crop)
+        species, score, text = None, 0.0, " / ".join(texts)
+        for t in texts:
+            sp, sc = self.matcher.match(t)
+            if sp and sc > score:
+                species, score = sp, sc
+        if not species and not (texts and self.state.nicknames.match(text)):
+            # 読めなかったら、白い文字だけを取り出してもう一度 (選出画面の文字で効果があった方法)
+            texts2 = self.ocr.recognize(self.white_text(crop))
+            for t in texts2:
+                sp, sc = self.matcher.match(t)
+                if sp and sc > score:
+                    species, score = sp, sc
+            if species or (texts2 and not texts):
+                texts, text = texts2, " / ".join(texts2)
+        return species, score, texts, text
+
+    @staticmethod
+    def _strong(reads):
+        """はっきり読めた名前欄の数 (ポケモン名 or 登録済みニックネーム)"""
+        return sum(1 for _, rd in reads if rd and rd[0] and rd[1] >= 0.85)
+
+    def check_battle_layout(self, frame, cfg, scale, reads):
+        """対戦画面の名前が読めない欄があるとき、同じ画面 (スマホ版) の別の配置でも読んでみる。
+        機種によって画面の端の余白が違い、名前欄の位置がずれるため。2 回続けて別の配置の方が多く読めたら切り替える。"""
+        from .config import PRESETS
+        preset = PRESETS.get(cfg.get("layout")) or {}
+        sets = [preset.get("regions")] + list(preset.get("regions_alt") or [])
+        sets = [s for s in sets if s and [(r["x"], r["y"]) for r in s] != [(r["x"], r["y"]) for r in cfg["regions"]]]
+        strong = self._strong(reads)
+        now = time.time()
+        if not sets or strong >= len(reads) or now - self.last_layout_try < 5:  # 全部読めていれば試さない (5 秒に 1 回まで)
+            return reads
+        self.last_layout_try = now
+        for j, regions in enumerate(sets):
+            alt = [(r, self.read_region(frame, r, scale)) for r in regions]
+            if self._strong(alt) > strong:
+                n = self.region_votes.get(j, 0) + 1
+                self.region_votes = {j: n}
+                if n >= 2:
+                    log.info("対戦画面の名前欄の位置を切り替えました (%d → %d 個読めた)", strong, self._strong(alt))
+                    cfg["regions"] = copy.deepcopy(regions)
+                    save_config(cfg)
+                    self.state.status["layout_switched"] = "対戦画面の名前欄の位置"
+                    self.region_votes = {}
+                    return alt
+                return reads
+        self.region_votes = {}
+        return reads
 
     def check_mega(self, frame, r, cfg):
         """顔画像が、そのポケモンの「通常」の見た目から変わったらメガシンカと判断する。
