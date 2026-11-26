@@ -28,7 +28,8 @@ DEFAULT_CONFIG = {
     "server": {"host": "127.0.0.1", "port": 8765},
     # 採用率データの取得元。source: championsbattledata (性格・能力ポイントあり、毎日更新) / pikalytics
     # format: Doubles / Singles (championsbattledata)。pikalytics_format: Pikalytics のフォーマットコード
-    # update_hour_utc: データ元の毎日の更新時刻 (UTC)。これより後に取得済みなら再取得しない。5 = 日本時間 14:00
+    # championsbattledata はデータの作成日時を見て、取得済みのデータから更新されていなければ再取得しない。
+    # update_hour_utc: 作成日時が分からない Pikalytics の区切り (UTC の時)。これより後に取得済みなら再取得しない。5 = 日本時間 14:00
     "usage": {"source": "championsbattledata", "format": "Doubles", "pikalytics_format": "gen9championsvgc2026regmc",
               "update_hour_utc": 5,
               "auto_update": True},  # 起動時に、新しいデータがあれば取得する

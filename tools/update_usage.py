@@ -10,10 +10,12 @@
     python tools/update_usage.py --format Singles
     python tools/update_usage.py --source pikalytics --format gen9championsou
     python tools/update_usage.py --source pikalytics --list-formats
-    python tools/update_usage.py --force                  # 今日すでに取得済みでも取得し直す
+    python tools/update_usage.py --force                  # 取得済みでも取得し直す
 
-データ元に負荷をかけないよう、前回の取得以降にデータ元が更新されていなければ取得しない
-(データ元の更新は毎日 04:40 UTC = 日本時間 13:40 頃。区切りは config.json の usage.update_hour_utc、既定 5 = 日本時間 14:00)。
+データ元に負荷をかけないよう、取得済みのデータからデータ元が更新されていなければ取得しない。
+Pokémon Champions Battle Data は順位の一覧 (約 30KB) のデータ作成日時 (generatedAt) で判断する
+(更新時刻は日によって違う: 13:40 頃の日、18:17 と 21:02 の 2 回の日があった)。
+Pikalytics は毎日 config.json の usage.update_hour_utc (既定 5 = 日本時間 14:00) を区切りにする。
 """
 import argparse
 import datetime
@@ -178,9 +180,9 @@ def fetch_champion_icons(roster, delay=0.1):
         time.sleep(delay)
 
 
-def fetch_cbd(fmt, limit, delay):
+def fetch_cbd(fmt, limit, delay, rk=None):
     fmt = {"doubles": "Doubles", "singles": "Singles"}.get(fmt.lower(), "Doubles")
-    rk = get_json(f"{CBD_API}/rankings?format={fmt}")  # 全ポケモンの順位 (候補の絞り込みに使う)
+    rk = rk or get_json(f"{CBD_API}/rankings?format={fmt}")  # 全ポケモンの順位 (候補の絞り込みに使う)
     result = []
     for item in rk.get("rankings", [])[:limit]:
         time.sleep(delay)
@@ -198,6 +200,7 @@ def fetch_cbd(fmt, limit, delay):
         "url": "https://championsbattledata.com/",
         "format": fmt + (f" {seasons[0]}" if seasons else ""),  # seasons は新しい順 (Current, M7, M6, ...)
         "data_date": (rk.get("generatedAt") or "")[:10] or None,
+        "generated_at": rk.get("generatedAt"),  # データ元のデータの作成日時 (次回の「取得済み」判定に使う)
         # 対戦で使える全ポケモン (使用率順)。選出画面のタイプからポケモンを絞り込むときの候補
         "roster": [r.get("battleName") or r["name"] for r in rk.get("rankings", [])],
     }
@@ -208,16 +211,19 @@ SOURCE_NAMES = {"championsbattledata": "Pokémon Champions Battle Data", "pikaly
 
 
 def last_update(now: datetime.datetime, hour_utc: float) -> datetime.datetime:
-    """直近のデータ更新時刻 (UTC の hour_utc 時)。データ元は毎日 04:40 UTC 頃に更新されるので、既定は余裕を見て 5:00 UTC。"""
+    """直近のデータ更新時刻 (UTC の hour_utc 時)。データ元の作成日時が分からないとき (Pikalytics) の区切り。"""
     now = now.astimezone(datetime.timezone.utc)
     t = now.replace(hour=int(hour_utc), minute=int(hour_utc % 1 * 60), second=0, microsecond=0)
     return t if now >= t else t - datetime.timedelta(days=1)
 
 
-def fetched_since_update(path: Path, source: str, fmt: str, now=None, hour_utc: float = 5.0):
+def fetched_since_update(path: Path, source: str, fmt: str, now=None, hour_utc: float = 5.0, generated_at=None):
     """前回の取得 (同じデータ元・形式) が、直近のデータ更新より後なら、その取得日時を返す (= 取り直しても同じデータ)。
 
-    区切りを PC の日付ではなくデータ元の更新時刻にしているので、午前に取得しても、更新後の午後にもう一度取得できる。
+    generated_at: データ元の今のデータの作成日時 (Pokémon Champions Battle Data は分かる)。
+      分かれば、前回取得したデータの作成日時と同じか (古い形式のデータは、取得日時がそれより後か) で判断する。
+      データ元の更新時刻は日によって違う (13:40 頃の日も 18:00 過ぎの日もあった) ため、決まった時刻で区切らない。
+    分からなければ (Pikalytics) 毎日 hour_utc 時を区切りにする。
     """
     now = now or datetime.datetime.now(datetime.timezone.utc)
     try:
@@ -229,9 +235,18 @@ def fetched_since_update(path: Path, source: str, fmt: str, now=None, hour_utc: 
         fetched = fetched.astimezone()  # 以前の形式 (タイムゾーン無し) は PC の時刻として扱う
     same_source = meta.get("source_id") == source or meta.get("source") == SOURCE_NAMES[source]
     same_format = (meta.get("format_requested") or meta.get("format") or "").split(" ")[0].lower() == fmt.lower()
-    if same_source and same_format and fetched >= last_update(now, hour_utc):
-        return fetched
-    return None
+    if not (same_source and same_format):
+        return None
+    if generated_at is not None:
+        if meta.get("generated_at"):
+            return fetched if _parse_time(meta["generated_at"]) >= generated_at else None
+        return fetched if fetched >= generated_at else None
+    return fetched if fetched >= last_update(now, hour_utc) else None
+
+
+def _parse_time(text):
+    t = datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    return t if t.tzinfo else t.replace(tzinfo=datetime.timezone.utc)
 
 
 def main():
@@ -242,7 +257,7 @@ def main():
     ap.add_argument("--delay", type=float, default=0.5, help="リクエスト間隔(秒)")
     ap.add_argument("--list-formats", action="store_true", help="Pikalytics のフォーマット一覧")
     ap.add_argument("--out", help="保存先 (既定: data/usage.json)")
-    ap.add_argument("--force", action="store_true", help="今日すでに取得済みでも取得し直す")
+    ap.add_argument("--force", action="store_true", help="取得済みでも取得し直す")
     args = ap.parse_args()
 
     if args.list_formats:
@@ -267,17 +282,27 @@ def update(source=None, fmt=None, limit=None, delay=0.5, out=None, force=False):
     out = out or ROOT / "data" / "usage.json"
 
     hour_utc = float(ucfg.get("update_hour_utc", 5.0))
-    done = None if force else fetched_since_update(out, source, fmt, hour_utc=hour_utc)
+    rk, generated = None, None
+    if source == "championsbattledata":
+        # 順位の一覧 (約 30KB) だけ先に取り、データ元のデータがいつ作られたかを見る
+        rk = get_json(f"{CBD_API}/rankings?format={fmt}")
+        if rk.get("generatedAt"):
+            generated = _parse_time(rk["generatedAt"])
+    done = None if force else fetched_since_update(out, source, fmt, hour_utc=hour_utc, generated_at=generated)
     if done:
-        now = datetime.datetime.now(datetime.timezone.utc)
-        nxt = (last_update(now, hour_utc) + datetime.timedelta(days=1)).astimezone()
-        print(f"前回の取得 ({done.astimezone():%m/%d %H:%M}) 以降、データ元はまだ更新されていないため、取得しません。")
-        print(f"次の更新: {nxt:%m/%d %H:%M} 頃。取得し直す場合は --force を付けて実行してください (update_usage.bat --force)。")
+        if generated:
+            print(f"データ元の最新データ ({generated.astimezone():%m/%d %H:%M} 作成) は取得済みのため、取得しません。")
+        else:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            nxt = (last_update(now, hour_utc) + datetime.timedelta(days=1)).astimezone()
+            print(f"前回の取得 ({done.astimezone():%m/%d %H:%M}) 以降、データ元はまだ更新されていないため、取得しません。")
+            print(f"次の更新: {nxt:%m/%d %H:%M} 頃。")
+        print("取得し直す場合は --force を付けて実行してください (update_usage.bat --force)。")
         return False
 
     print(f"データ元: {SOURCE_NAMES[source]} / {fmt}")
     if source == "championsbattledata":
-        result, meta = fetch_cbd(fmt, limit or 100, delay)
+        result, meta = fetch_cbd(fmt, limit or 100, delay, rk)
         try:
             fetch_champion_icons(meta.get("roster", []))
         except Exception as e:  # 画像が取れなくても採用率データは保存する

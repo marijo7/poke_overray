@@ -66,6 +66,22 @@ class TestFetchOncePerUpdate(unittest.TestCase):
         self.assertIsNotNone(self.check("2026-11-25T15:00:00+09:00", "2026-11-26T10:00"))
         self.assertIsNone(self.check("2026-11-25T15:00:00+09:00", "2026-11-26T14:30"))
 
+    def test_generated_at_of_source(self):
+        """データ元の作成日時が分かれば、決まった時刻ではなくそれで判断する (今日は 18:17 に更新された)"""
+        gen = self.jst("2026-11-26T18:17")
+        # 15:00 に取得 (前日のデータ) → 18:17 に作られたデータは未取得 → 取得する
+        f = self.write({"source_id": "championsbattledata", "format_requested": "Doubles",
+                        "fetched_at": "2026-11-26T15:00:00+09:00", "generated_at": "2026-11-25T09:00:00Z"})
+        self.assertIsNone(update_usage.fetched_since_update(f, "championsbattledata", "Doubles", generated_at=gen))
+        # 同じデータを取得済み → 取得しない
+        f = self.write({"source_id": "championsbattledata", "format_requested": "Doubles",
+                        "fetched_at": "2026-11-26T20:00:00+09:00", "generated_at": "2026-11-26T09:17:00Z"})
+        self.assertIsNotNone(update_usage.fetched_since_update(f, "championsbattledata", "Doubles", generated_at=gen))
+        # 以前の形式 (作成日時を持っていない): 取得日時がデータの作成より後なら取得済み
+        f = self.write({"source_id": "championsbattledata", "format_requested": "Doubles",
+                        "fetched_at": "2026-11-26T15:00:00+09:00"})
+        self.assertIsNone(update_usage.fetched_since_update(f, "championsbattledata", "Doubles", generated_at=gen))
+
     def test_source_and_format(self):
         self.assertIsNone(self.check("2026-11-25T15:00:00+09:00", "2026-11-25T16:00", fmt="Singles"))
         self.assertIsNone(self.check("2026-11-25T15:00:00+09:00", "2026-11-25T16:00", source="pikalytics"))
