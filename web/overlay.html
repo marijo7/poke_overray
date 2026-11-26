@@ -12,7 +12,7 @@
     nature=0           性格を非表示
     natures=2          性格の表示件数
     spreads=0          能力ポイント配分の表示件数 (既定は非表示)
-    moves=6 items=3 abilities=2   表示件数 (0 で非表示)。行数が多いと 1 行を細くして、カードの大きさは変えない
+    moves=6 items=3 abilities=3   表示件数 (特性は最大 3 つなので既定で全部) (0 で非表示)。行数が多いと 1 行を細くして、カードの大きさは変えない
     w=300 h=600        カードの幅・高さ (px) を固定。省略時も、データの量によらず同じ大きさになるよう行数を固定している
     layout=row         カードを横並びにする (既定は縦並び)
     history=1          この対戦で見た相手の一覧を表示
@@ -107,7 +107,7 @@
     slots: q.get("slot") ? q.get("slot").split(",") : null,
     moves: +(q.get("moves") ?? 6),
     items: +(q.get("items") ?? 3),
-    abilities: +(q.get("abilities") ?? 2),
+    abilities: +(q.get("abilities") ?? 3),  // 特性はポケモンごとに最大 3 つなので、既定で全部出す
     sprite: q.get("sprite") !== "0",
     stats: q.get("stats") !== "0",
     nature: q.get("nature") !== "0",
