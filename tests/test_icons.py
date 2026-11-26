@@ -69,3 +69,27 @@ class TestIcons(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDedupe(unittest.TestCase):
+    def _face(self, dx=0, color=(220, 60, 60)):
+        from PIL import ImageDraw
+        img = Image.new("RGB", (64, 64), (200, 40, 120))
+        d = ImageDraw.Draw(img)
+        d.ellipse((14 + dx, 10, 46 + dx, 50), fill=color)
+        d.rectangle((26 + dx, 30, 36 + dx, 60), fill=(30, 30, 30))
+        return img
+
+    def test_near_duplicates_and_cap_are_removed(self):
+        import tempfile
+        from pathlib import Path
+        from overlay.icons import IconDB
+        db = IconDB(Path(tempfile.mkdtemp()))
+        db.add(self._face(), "A")
+        db.add(self._face(dx=1), "A")             # 1px ずれただけ → 重複
+        db.add(self._face(color=(60, 60, 220)), "B")
+        db.add(self._face(dx=-14, color=(250, 250, 90)), "A")  # 別の見た目 → 残す
+        db.add(self._face(dx=12, color=(90, 250, 90)), "A")    # 3 枚目 → 上限 2 を超える
+        self.assertEqual(db.dedupe(lambda k: k, 2), 2)
+        self.assertEqual(sorted(it["key"] for it in db.list()), ["A", "A", "B"])
+        self.assertIsNotNone(db.find_duplicate(self._face(dx=1), [it["id"] for it in db.list()]))

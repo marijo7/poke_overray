@@ -124,7 +124,8 @@ class State:
 
     def _label_icon_locked(self, uid, key):
         crop = self.icon_crops.get(uid)
-        if crop is not None and self.icons is not None:
+        if crop is not None and self.icons is not None and not self.icons.find_duplicate(
+                crop, [it["id"] for it in self.icons.list() if it["key"] == key]):  # ほとんど同じ画像は増やさない
             self.icons.add(crop, key)
         self.learn_types(uid, key)
         self.icon_guess.pop(uid, None)
@@ -278,6 +279,9 @@ class Recognizer(threading.Thread):
         self.preview_opp, self.preview_my = [], []
         # 体力バー横の顔画像 (メガシンカ判定用)。種族ごとに「通常」と「メガシンカ後」の見た目を覚える
         self.portraits = IconDB(ICON_DIR.parent / "portraits")
+        n = self.portraits.dedupe(self._portrait_group, self.PORTRAIT_MAX)  # 以前の版で溜まった重複を整理
+        if n:
+            log.info("ほとんど同じ顔画像 %d 枚を整理しました", n)
         self.portrait_pending = {}  # region id -> (候補フォルム, 連続回数)
         self.champ = ChampionIcons()  # Champions のポケモン画像 (選出画面のアイコンの推定用)
         self.pending_nick = {}      # region id -> 未登録ニックネームを続けて読んだ回数
@@ -912,8 +916,8 @@ class Recognizer(threading.Thread):
             just_entered = time.time() - slot["updated"] < 5
             watched = time.time() - self.last_preview_seen < 20 * 60
             if just_entered and watched and (key is None or score < float(cfg.get("preview", {}).get("icon_threshold", 0.8))):
-                self.portraits.add(inner, species)
-                log.info("顔画像を記憶: %s (通常)", species)
+                if self.add_portrait(inner, species):
+                    log.info("顔画像を記憶: %s (通常)", species)
             if key is None:
                 return
         self.state.debug.setdefault(r["id"], {})["portrait"] = {"match": key, "score": round(score, 3)}
@@ -932,7 +936,7 @@ class Recognizer(threading.Thread):
         if cand and n >= 4:
             log.info("%s: メガシンカを検出 → %s (一致度 %.2f)", r["id"], cand, score)
             if score < thr:
-                self.portraits.add(inner, cand)  # 画像で確かめたメガシンカ後の見た目を覚える
+                self.add_portrait(inner, cand)  # 画像で確かめたメガシンカ後の見た目を覚える
             self.state.mega_used[side] = species
             self.state.set_form(r["id"], cand)
 
@@ -966,6 +970,32 @@ class Recognizer(threading.Thread):
         thr = float(self.get_config().get("preview", {}).get("icon_threshold", 0.8))
         return key if key and score >= thr else None
 
+    PORTRAIT_MAX = 2  # 1 匹あたりの顔画像の数 (相手側のピンク・自分側の青の背景で 1 枚ずつ程度)
+
+    def _portrait_group(self, key):
+        """同じポケモンの顔画像をまとめるキー (日本語名・採用率データのキーなど、呼び方の違いをそろえる)"""
+        info = resolve(key, self.state.usage) or {}
+        if not info.get("species"):
+            return key
+        if is_mega(info.get("key") or ""):
+            return info["key"]  # メガシンカ後は別の見た目
+        female = key.endswith("#F") or (info.get("key") or "").endswith("-F") or "♀" in (info.get("display") or "")
+        return info["species"] + ("♀" if female else "")  # オス・メスで見た目が違うポケモンは別
+
+    def add_portrait(self, inner, key, force=False):
+        """顔画像を覚える。同じポケモンでほとんど同じ画像があれば覚えない。
+        1 匹 PORTRAIT_MAX 枚まで (force: 手動で選んだとき。いちばん古いものと入れ替える)。"""
+        g = self._portrait_group(key)
+        same = [it["id"] for it in self.portraits.list() if self._portrait_group(it["key"]) == g]
+        if self.portraits.find_duplicate(inner, same):
+            return False
+        if len(same) >= self.PORTRAIT_MAX:
+            if not force:
+                return False
+            self.portraits.remove(same[0])
+        self.portraits.add(inner, key)
+        return True
+
     def learn_base_portrait(self, frame, r, key):
         """名前で分かったポケモンの顔画像を覚える (ニックネームのときに顔で判定するため)。
         メガシンカするポケモンは check_mega が「通常の姿」を慎重に覚えるのでここでは扱わない。
@@ -973,16 +1003,13 @@ class Recognizer(threading.Thread):
         species = resolve(key, self.state.usage)["species"]
         if not species or mega_forms(species):
             return
-        n = sum(1 for it in self.portraits.list() if it["key"] == key)
-        if n >= 3:
-            return
         outer, inner = crop_with_margin(frame, r["portrait"])
-        if n:
-            _, score = self.portraits.match(outer, keys={key})
-            if score >= 0.9:
-                return
-        self.portraits.add(inner, key)
-        log.info("顔画像を記憶: %s", key)
+        g = self._portrait_group(key)
+        keys = {it["key"] for it in self.portraits.list() if self._portrait_group(it["key"]) == g}
+        if keys and self.portraits.match(outer, keys=keys)[1] >= 0.9:
+            return  # 覚えた顔で見分けられている
+        if self.add_portrait(inner, key):
+            log.info("顔画像を記憶: %s", key)
 
     def learn_portrait(self, region_id, key):
         """手動でフォルムを選んだとき、そのときの顔画像をそのフォルムの見た目として覚える。"""
@@ -993,8 +1020,8 @@ class Recognizer(threading.Thread):
             return False
         label = info["key"] if (is_mega(info["key"]) or not mega_forms(info["species"])) else info["species"]
         _, inner = crop_with_margin(frame, r["portrait"])
-        self.portraits.add(inner, label)
-        log.info("顔画像を記憶 (手動): %s", label)
+        if self.add_portrait(inner, label, force=True):
+            log.info("顔画像を記憶 (手動): %s", label)
         return True
 
 def _ema(prev, value, k=0.2):

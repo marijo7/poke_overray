@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ICON_DIR = Path(__file__).resolve().parent.parent / "data" / "icons"
 SIZE = 32       # 比較用に縮小する大きさ
@@ -48,12 +48,26 @@ def crop_with_margin(frame: Image.Image, rect: dict):
     return outer, inner
 
 
+def dup_feature(img: Image.Image) -> np.ndarray:
+    """ほとんど同じ画像かどうかを見る用の特徴 (16x16 にぼかして縮小。1〜2px のずれは同じとみなせる)。
+    実測: 同じ顔を 1〜2px ずらしたもの 0.94 以上 / 別のポケモン 0.62 以下"""
+    a = np.asarray(img.convert("RGB").filter(ImageFilter.GaussianBlur(1)).resize((16, 16), Image.BILINEAR),
+                   dtype=np.float32)
+    a = a - a.mean(axis=(0, 1))
+    v = a.ravel()
+    return v / max(float(np.linalg.norm(v)), 1e-6)
+
+
+DUP_THRESHOLD = 0.85
+
+
 class IconDB:
     def __init__(self, directory: Path = ICON_DIR):
         self.dir = directory
         self.lock = threading.Lock()
         self.items = []          # [{"id", "key"}]
         self.features = np.zeros((0, SIZE * SIZE * 3), np.float32)
+        self._dup_cache = {}
         self.load()
 
     @property
@@ -92,9 +106,40 @@ class IconDB:
                 return False
             self.items.pop(idx)
             self.features = np.delete(self.features, idx, axis=0)
+            self._dup_cache.pop(iid, None)
             (self.dir / f"{iid}.png").unlink(missing_ok=True)
             self._save_index()
             return True
+
+    def _dup(self, iid):
+        if iid not in self._dup_cache:
+            p = self.dir / f"{iid}.png"
+            self._dup_cache[iid] = dup_feature(Image.open(p)) if p.exists() else None
+        return self._dup_cache[iid]
+
+    def find_duplicate(self, img: Image.Image, ids):
+        """ids の中に img とほとんど同じ画像があればその id"""
+        f = dup_feature(img)
+        for iid in ids:
+            g = self._dup(iid)
+            if g is not None and float(f @ g) >= DUP_THRESHOLD:
+                return iid
+        return None
+
+    def dedupe(self, group, max_per: int):
+        """ほとんど同じ画像と、1 つのグループ (group(キー) が同じもの) に max_per 枚を超える分を消す (古いものを残す)。
+        戻り値: 消した数"""
+        kept, drop = {}, []
+        for it in self.list():
+            g = group(it["key"])
+            ids = kept.setdefault(g, [])
+            if len(ids) >= max_per or self.find_duplicate(Image.open(self.dir / f"{it['id']}.png"), ids):
+                drop.append(it["id"])
+            else:
+                ids.append(it["id"])
+        for iid in drop:
+            self.remove(iid)
+        return len(drop)
 
     def image_path(self, iid: str):
         p = self.dir / f"{iid}.png"

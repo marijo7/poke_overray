@@ -37,6 +37,9 @@ def main():
                      len(usage.entries), m.get("fetched_at"))
 
     icons = IconDB()
+    n = icons.dedupe(lambda k: k, 3)  # 以前の版で溜まった、ほとんど同じアイコンを整理
+    if n:
+        logging.info("ほとんど同じアイコン %d 件を整理しました", n)
     logging.info("登録済みアイコン: %d 件", len(icons.items))
     state = State(usage, cfg.get("my_party"), icons)
     recognizer = None
