@@ -288,6 +288,7 @@ class Recognizer(threading.Thread):
         self.layout_votes = {}      # 他の画面レイアウトで選出画面が読めた回数
         self.region_votes = {}      # 対戦画面の別の名前欄の位置で多く読めた回数
         self.autofit_job = None     # 設定画面から頼まれた範囲の自動調整
+        self.last_hud_alt_try = 0.0
         self.last_layout_try = 0.0
         self.battle_seen = False    # 前の選出画面のあと、対戦画面でポケモンを読み取ったか (= 次の選出画面は新しい対戦)
         self.my_icon_cache = {}     # 選出画面の自分のポケモンの絵の判定結果 (対戦ごと)
@@ -744,7 +745,31 @@ class Recognizer(threading.Thread):
                  f" → 推定 {resolve(guess, usage)['display']}" if guess else "")
         return guess
 
+    def battle_screen(self, frame, cfg):
+        """対戦画面 (名前欄のパネルが写っている) か。対戦の後の結果画面・メニュー・ボックス等で、
+        たまたま名前欄の位置にあるポケモンの名前を読まないようにする。見本が無い配置では常に True。"""
+        from .autofit import battle_hud_visible
+        from .config import PRESETS
+        layout = cfg.get("layout")
+        vis = battle_hud_visible(frame, cfg["regions"], layout)
+        if vis is None or vis:
+            return True
+        # 名前欄の位置が合っていない (別の機種の配置) だけかもしれないので、ときどき別の配置でも確かめる
+        now = time.time()
+        if not cfg.get("regions_fitted") and now - self.last_hud_alt_try >= 3:
+            self.last_hud_alt_try = now
+            preset = PRESETS.get(layout) or {}
+            for regions in [preset.get("regions")] + list(preset.get("regions_alt") or []):
+                if regions and regions != cfg["regions"] and battle_hud_visible(frame, regions, layout):
+                    return True
+        return False
+
     def process_battle(self, frame, cfg, scale):
+        if not self.battle_screen(frame, cfg):
+            self.state.status["screen"] = "対戦画面以外"
+            self.pending.clear()
+            self.pending_nick.clear()
+            return
         self.state.status["screen"] = "対戦"
         W, H = frame.size
         need = max(1, int(cfg.get("confirm_frames", 2)))

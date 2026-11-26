@@ -344,6 +344,73 @@ def match_panel(frame, t, cx, cy, s0, span, spread=0.3):
     return best
 
 
+# ---- 対戦画面かどうか (認識ループで毎フレーム使う) ----
+
+_TPL_CACHE = {}
+
+
+def _template_small(layout, rid):
+    """見本を半分の大きさにしたもの (毎フレームの判定を軽くするため)"""
+    key = (layout, rid)
+    if key not in _TPL_CACHE:
+        t = load_template(layout, rid)
+        if t is not None:
+            th, tw = t["tpl"].shape[:2]
+            size = (max(1, tw // 2), max(1, th // 2))
+            tpl = np.asarray(Image.fromarray(t["tpl"].astype(np.uint8)).resize(size, Image.BILINEAR), np.float32)
+            m = np.asarray(Image.fromarray((t["mask"] * 255).astype(np.uint8)).resize(size, Image.BILINEAR),
+                           np.float32) / 255
+            t = dict(t, tpl=tpl, mask=(m > 0.99).astype(np.float32), k=t["k"] / 2)
+        _TPL_CACHE[key] = t
+    return _TPL_CACHE[key]
+
+
+def panel_score(frame, r, layout):
+    """名前欄 r のまわりに、対戦画面のパネルの枠が写っているか (見本との一致度 -1〜1)。見本が無ければ None。
+    r は今の設定の範囲 (自動調整・手での調整・別の配置で、見本を作った範囲から位置や大きさが少しずれていてもよい)。"""
+    from .config import PRESETS
+    preset = PRESETS.get(layout) or {}
+    ref = next((x for x in preset.get("regions", []) if x["id"] == r["id"]), None)
+    t = _template_small(layout, r["id"])
+    if not ref or not t or not preset.get("fit"):
+        return None
+    W, H = frame.size
+    rw, rh = preset["fit"]["battle_ref_size"]
+    s0 = (r["h"] * H) / (ref["h"] * rh)  # 見本を作った画面と比べた大きさ (の目安)
+    th, tw = t["tpl"].shape[:2]
+    best = -2.0
+    for s in (s0 * 0.86, s0 * 0.93, s0, s0 * 1.07, s0 * 1.14):
+        x = r["x"] * W - s * (ref["x"] * rw - t["box"][0])
+        y = r["y"] * H - s * (ref["y"] * rh - t["box"][1])
+        f = t["k"] / s  # 今の画面 → 見本の縮尺
+        span = 0.35 * th / f  # 位置のずれの許容 (パネルの高さの 3〜4 割)
+        box = (int(x - span), int(y - span), int(x + span + tw / f) + 1, int(y + span + th / f) + 1)
+        crop = frame.crop(box)
+        a = np.asarray(crop.resize((max(1, round(crop.width * f)), max(1, round(crop.height * f))),
+                                   Image.BILINEAR), np.float32)
+        best = max(best, _ncc_search(a, t["tpl"], t["mask"])[0])
+    return best
+
+
+def battle_hud_visible(frame, regions, layout, need=2, thr=0.65):
+    """対戦画面の名前欄のパネルが need 個以上写っているか。見本が無い (判定できない) ときは None。
+    実測: 対戦画面は 3〜4 個が 0.68 以上 (位置が少しずれた設定でも)、
+    選出画面・メニュー・ボックスは全部 0.59 以下だった。"""
+    hits, known = 0, False
+    if frame.height > 600:  # 判定は小さい画像で十分 (毎フレーム使うので軽くする)
+        frame = frame.resize((round(frame.width * 600 / frame.height), 600), Image.BILINEAR)
+    for r in regions:
+        sc = panel_score(frame, r, layout)
+        if sc is None:
+            continue
+        known = True
+        if sc >= thr:
+            hits += 1
+            if hits >= need:
+                return True
+    return False if known else None
+
+
 def _name_like(text):
     t = text.strip()
     if any(w in t for w in UI_WORDS):
