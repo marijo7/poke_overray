@@ -248,36 +248,42 @@ def main():
     if args.list_formats:
         list_formats()
         return
+    update(source=args.source, fmt=args.format, limit=args.limit, delay=args.delay,
+           out=Path(args.out) if args.out else None, force=args.force)
 
+
+def update(source=None, fmt=None, limit=None, delay=0.5, out=None, force=False):
+    """採用率データを取得して保存する。データ元が前回の取得以降に更新されていなければ何もしない。
+    戻り値: True (取得して保存した) / False (取得不要)。取得できなければ SystemExit / 例外"""
     ucfg = load_config()["usage"]
-    source = args.source or ucfg.get("source", "championsbattledata")
+    source = source or ucfg.get("source", "championsbattledata")
     if source == "championsbattledata":
-        fmt = args.format or ucfg.get("format") or "Doubles"
+        fmt = fmt or ucfg.get("format") or "Doubles"
         if fmt.startswith("gen9"):  # 旧設定 (Pikalytics のコード) からの移行
             fmt = "Singles" if ("ou" in fmt or "bss" in fmt) else "Doubles"
         fmt = {"doubles": "Doubles", "singles": "Singles"}.get(fmt.lower(), "Doubles")
     else:
-        fmt = args.format or ucfg.get("pikalytics_format") or "gen9championsvgc2026regmc"
-    out = Path(args.out) if args.out else ROOT / "data" / "usage.json"
+        fmt = fmt or ucfg.get("pikalytics_format") or "gen9championsvgc2026regmc"
+    out = out or ROOT / "data" / "usage.json"
 
     hour_utc = float(ucfg.get("update_hour_utc", 5.0))
-    done = None if args.force else fetched_since_update(out, source, fmt, hour_utc=hour_utc)
+    done = None if force else fetched_since_update(out, source, fmt, hour_utc=hour_utc)
     if done:
         now = datetime.datetime.now(datetime.timezone.utc)
         nxt = (last_update(now, hour_utc) + datetime.timedelta(days=1)).astimezone()
         print(f"前回の取得 ({done.astimezone():%m/%d %H:%M}) 以降、データ元はまだ更新されていないため、取得しません。")
         print(f"次の更新: {nxt:%m/%d %H:%M} 頃。取得し直す場合は --force を付けて実行してください (update_usage.bat --force)。")
-        return
+        return False
 
     print(f"データ元: {SOURCE_NAMES[source]} / {fmt}")
     if source == "championsbattledata":
-        result, meta = fetch_cbd(fmt, args.limit or 100, args.delay)
+        result, meta = fetch_cbd(fmt, limit or 100, delay)
         try:
             fetch_champion_icons(meta.get("roster", []))
         except Exception as e:  # 画像が取れなくても採用率データは保存する
             print(f"ポケモン画像を取得できませんでした: {e}")
     else:
-        result, meta = fetch_pikalytics(fmt, args.limit or 50, args.delay)
+        result, meta = fetch_pikalytics(fmt, limit or 50, delay)
     if not result:
         sys.exit("採用率データを取得できませんでした")
 
@@ -285,6 +291,7 @@ def main():
     meta["source_id"], meta["format_requested"] = source, fmt  # 次回の「今日取得済み」判定に使う
     out.write_text(json.dumps({"meta": meta, "pokemon": result}, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"保存しました: {out} ({len(result)} 匹)")
+    return True
 
 
 def fetch_pikalytics(fmt, limit, delay):

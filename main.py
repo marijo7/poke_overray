@@ -10,6 +10,8 @@
 import argparse
 import logging
 import sys
+import threading
+from pathlib import Path
 
 from overlay.config import load_config
 from overlay.icons import IconDB
@@ -18,9 +20,23 @@ from overlay.server import App, serve
 from overlay.usage import UsageDB
 
 
+def update_usage_on_start(usage):
+    """起動時に、データ元が前回の取得以降に更新されていれば採用率データを取得し、取得できたら差し替える。
+    (取得中も前のデータで動く。取得できなくても前のデータのまま)"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
+    try:
+        import update_usage
+        if update_usage.update():
+            usage.reload()
+            logging.info("採用率データを更新しました (%d 匹)", len(usage.entries))
+    except BaseException as e:  # SystemExit (取得できなかった) も含めて、起動中の処理は止めない
+        logging.warning("採用率データを取得できませんでした。前のデータのまま使います (%s)", e)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-recognize", action="store_true", help="画面認識をせず手動切替のみで使う")
+    ap.add_argument("--no-update", action="store_true", help="起動時に採用率データを取得しない")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
@@ -30,7 +46,7 @@ def main():
     cfg = load_config()
     usage = UsageDB()
     if not usage.entries:
-        logging.warning("採用率データがありません。先に update_usage.bat (python tools/update_usage.py) を実行してください。")
+        logging.warning("採用率データがありません。取得が終わるまでお待ちください (update_usage.bat でも取得できます)。")
     else:
         m = usage.meta
         logging.info("採用率データ: %s %s (%d 匹, 取得 %s)", m.get("format"), m.get("data_date"),
@@ -48,6 +64,9 @@ def main():
         recognizer.start()
     else:
         state.status.update(capture="無効 (--no-recognize)", ocr="-")
+
+    if not args.no_update and cfg["usage"].get("auto_update", True):
+        threading.Thread(target=update_usage_on_start, args=(usage,), daemon=True).start()
 
     app = App(cfg, state, usage, recognizer)
     httpd = serve(app)
