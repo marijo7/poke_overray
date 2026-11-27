@@ -38,7 +38,6 @@ class State:
         self.icons = icons     # IconDB (選出画面のアイコン照合)
         self.icon_crops = {}   # 未登録アイコンの切り出し画像 uid -> PIL.Image
         self.type_crops = {}   # uid -> ((左のタイプ 余白付き, 余白なし), (右のタイプ 余白付き, 余白なし))
-        self.type_db = IconDB(ICON_DIR.parent / "types") if icons is not None else None  # タイプアイコン (学習)
         self.type_icons = TypeIcons()  # データ元のタイプアイコン 18 種 (むしも含む)
         self.icon_guess = {}   # uid -> {"types": [...], "cands": [...], "guess": キー or None}: タイプからの推定
         self.mega_used = {}    # side -> メガシンカしたポケモン (1 回の対戦で 1 人 1 匹まで)
@@ -106,28 +105,11 @@ class State:
                         party.append(info["key"])
             self.version += 1
 
-    def learn_types(self, uid, key):
-        """名前の分かったアイコンの横のタイプアイコンを、そのタイプの見た目として覚える (1 タイプ 3 枚まで)。"""
-        crops, types = self.type_crops.get(uid), types_of(key, self.usage)
-        if not crops or not types or self.type_db is None:
-            return
-        # 2 タイプなら左=1 つ目・右=2 つ目、1 タイプなら右だけに出る
-        pairs = list(zip(crops, types)) if len(types) == 2 else [(crops[1], types[0])]
-        for (outer, inner), t in pairs:
-            n = sum(1 for it in self.type_db.list() if it["key"] == t)
-            if n >= 3:
-                continue
-            if self.type_db.has_key(t) and self.type_db.match(outer, keys={t})[1] >= 0.92:
-                continue  # もう同じ見た目を覚えている
-            self.type_db.add(inner, t)
-            log.info("タイプアイコンを記憶: %s", type_name_ja(t))
-
     def _label_icon_locked(self, uid, key):
         crop = self.icon_crops.get(uid)
         if crop is not None and self.icons is not None and not self.icons.find_duplicate(
                 crop, [it["id"] for it in self.icons.list() if it["key"] == key]):  # ほとんど同じ画像は増やさない
             self.icons.add(crop, key)
-        self.learn_types(uid, key)
         self.icon_guess.pop(uid, None)
         self.parties["opp"] = [key if m == "icon:" + uid else m for m in self.parties["opp"]]
 
@@ -571,7 +553,6 @@ class Recognizer(threading.Thread):
             if key and score >= thr:
                 self.preview_opp[i] = key
                 self.state.icon_guess.pop(uid, None)
-                self.state.learn_types(uid, key)
             elif uid in self.state.icon_guess:
                 pass  # 推定済み (毎フレーム推定し直さない)
             else:
@@ -676,11 +657,10 @@ class Recognizer(threading.Thread):
         return None
 
     def read_types(self, uid):
-        """タイプアイコン 2 つを、覚えたタイプアイコン・データ元のタイプアイコンと照合する。
+        """タイプアイコン 2 つを、データ元のタイプアイコン (色と記号の形) と照合する。
         戻り値: タイプのリスト (2 タイプなら [左, 右])。読めなかった方は None (例: [None, "ghost"])。
         1 つも読めなければ None"""
         crops = self.state.type_crops.get(uid)
-        dbs = [d for d in (self.state.type_db,) if d is not None and d.items]
         if not crops:
             return None
 
@@ -690,11 +670,7 @@ class Recognizer(threading.Thread):
 
         types = []
         for outer, inner in ([crops[1]] if is_empty(crops[0][1]) else crops):
-            t, score = max((d.match(outer) for d in dbs), key=lambda x: x[1]) if dbs else (None, 0.0)
-            if not t or score < 0.85:
-                # 覚えた見た目と合わない → データ元のタイプアイコン (色と記号の形) で判定
-                t, _ = self.state.type_icons.classify(inner)
-            types.append(t)
+            types.append(self.state.type_icons.classify(inner)[0])
         return types if any(types) else None
 
     def guess_by_types(self, frame, pv, i, n, uid):

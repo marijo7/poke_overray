@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw
 from overlay.icons import IconDB
 from overlay.names import types_of
 from overlay.recognizer import Recognizer, State
+from overlay.type_icons import TypeIcons
 from overlay.usage import UsageDB
 
 COLORS = {"fighting": (240, 120, 20), "poison": (140, 60, 190), "dragon": (60, 90, 220), "ground": (150, 90, 40),
@@ -41,20 +42,16 @@ class TestTypes(unittest.TestCase):
     def setUp(self):
         d = Path(tempfile.mkdtemp())
         self.state = State(usage(), icons=IconDB(d / "icons"))
-        self.state.type_db = IconDB(d / "types")
+        # データ元のタイプアイコンの代わり (タイプごとに色と記号が違う画像)
+        (d / "types").mkdir()
+        for t in COLORS:
+            type_icon(t)[1].save(d / "types" / f"{t}.png")
+        self.state.type_icons = TypeIcons(d / "types")
         self.rec = Recognizer(self.state, lambda: {"preview": {}})
 
-    def test_learn_and_guess(self):
+    def test_read_and_guess(self):
         st = self.state
         self.assertEqual(types_of("Sneasler"), ["fighting", "poison"])
-        # 1 回目: 名前の分かったアイコンからタイプを覚える
-        st.type_crops = {"a": (type_icon("fighting"), type_icon("poison")),
-                         "b": (type_icon("dragon"), type_icon("ground")),
-                         "c": (type_icon("fire"), type_icon("flying"))}
-        for uid, key in (("a", "Sneasler"), ("b", "Garchomp"), ("c", "Charizard")):
-            st.learn_types(uid, key)
-        self.assertEqual(len(st.type_db.items), 6)
-        # 2 回目: タイプを読んで候補を出す
         st.type_crops = {"x": (type_icon("dragon"), type_icon("ground")),
                          "y": (type_icon("fire"), type_icon("flying"))}
         self.rec.preview_opp = ["icon:x", "icon:y"]
@@ -64,17 +61,12 @@ class TestTypes(unittest.TestCase):
         self.assertEqual(st.icon_guess["y"]["cands"], ["Charizard", "Talonflame"])
 
     def test_single_type_is_on_the_right(self):
-        st = self.state
-        st.type_crops = {"a": (type_icon("fire"), type_icon("flying"))}
-        st.learn_types("a", "Charizard")
-        st.type_crops["g"] = (type_icon("fire", empty=True), type_icon("fire"))  # 1 タイプ: 左は空
+        self.state.type_crops = {"g": (type_icon("fire", empty=True), type_icon("fire"))}  # 1 タイプ: 左は空
         self.assertEqual(self.rec.read_types("g"), ["fire"])
 
-    def test_unknown_type_returns_none(self):
-        st = self.state
-        st.type_crops = {"a": (type_icon("fire"), type_icon("flying"))}
-        st.learn_types("a", "Charizard")
-        st.type_crops["z"] = (type_icon("dragon"), type_icon("ground"))  # まだ覚えていないタイプ
+    def test_unreadable_returns_none(self):
+        blank = Image.new("RGB", (48, 48), (150, 20, 60))
+        self.state.type_crops = {"z": ((blank, blank), (blank, blank))}
         self.assertIsNone(self.rec.read_types("z"))
 
     def test_guess_confirmed_when_it_appears(self):

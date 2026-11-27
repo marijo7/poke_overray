@@ -9,6 +9,7 @@
 """
 import argparse
 import logging
+import shutil
 import sys
 import threading
 from pathlib import Path
@@ -52,6 +53,10 @@ def main():
         logging.info("採用率データ: %s %s (%d 匹, 取得 %s)", m.get("format"), m.get("data_date"),
                      len(usage.entries), m.get("fetched_at"))
 
+    old_types = Path(__file__).resolve().parent / "data" / "types"
+    if old_types.is_dir():  # 以前の版で学習したタイプアイコン (今はデータ元のタイプアイコンで判定するので不要)
+        shutil.rmtree(old_types, ignore_errors=True)
+        logging.info("学習したタイプアイコン (data/types) を削除しました")
     icons = IconDB()
     n = icons.dedupe(lambda k: k, 3)  # 以前の版で溜まった、ほとんど同じアイコンを整理
     if n:

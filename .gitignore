@@ -16,7 +16,6 @@ web/fonts/*
 # 登録したニックネーム
 data/nicknames.json
 # 選出画面のタイプアイコン (各自の環境で学習)
-data/types/
 # 選出画面の照合用に取得する Champions のポケモン画像
 data/champions_icons/
 # 選出画面のマーカーの画像 (各自の環境で学習)
