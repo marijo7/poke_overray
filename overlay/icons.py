@@ -89,12 +89,13 @@ class IconDB:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._index.write_text(json.dumps(self.items, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    def add(self, img: Image.Image, key: str) -> str:
+    def add(self, img: Image.Image, key: str, **extra) -> str:
+        """extra: 一緒に記録する情報 (顔画像なら side="opp"/"me")"""
         with self.lock:
             self.dir.mkdir(parents=True, exist_ok=True)
             iid = uuid.uuid4().hex[:12]
             img.convert("RGB").save(self.dir / f"{iid}.png")
-            self.items.append({"id": iid, "key": key})
+            self.items.append({"id": iid, "key": key, **extra})
             self.features = np.vstack([self.features, template_feature(img)[None]])
             self._save_index()
             return iid
@@ -127,11 +128,11 @@ class IconDB:
         return None
 
     def dedupe(self, group, max_per: int):
-        """ほとんど同じ画像と、1 つのグループ (group(キー) が同じもの) に max_per 枚を超える分を消す (古いものを残す)。
-        戻り値: 消した数"""
+        """ほとんど同じ画像と、1 つのグループ (group(登録内容 dict) が同じもの) に max_per 枚を超える分を消す
+        (古いものを残す)。戻り値: 消した数"""
         kept, drop = {}, []
         for it in self.list():
-            g = group(it["key"])
+            g = group(it)
             ids = kept.setdefault(g, [])
             if len(ids) >= max_per or self.find_duplicate(Image.open(self.dir / f"{it['id']}.png"), ids):
                 drop.append(it["id"])

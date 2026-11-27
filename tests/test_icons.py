@@ -90,6 +90,28 @@ class TestDedupe(unittest.TestCase):
         db.add(self._face(color=(60, 60, 220)), "B")
         db.add(self._face(dx=-14, color=(250, 250, 90)), "A")  # 別の見た目 → 残す
         db.add(self._face(dx=12, color=(90, 250, 90)), "A")    # 3 枚目 → 上限 2 を超える
-        self.assertEqual(db.dedupe(lambda k: k, 2), 2)
+        self.assertEqual(db.dedupe(lambda it: it["key"], 2), 2)
         self.assertEqual(sorted(it["key"] for it in db.list()), ["A", "A", "B"])
         self.assertIsNotNone(db.find_duplicate(self._face(dx=1), [it["id"] for it in db.list()]))
+
+
+class TestPortraitPerSide(unittest.TestCase):
+    def test_one_per_side(self):
+        from overlay.recognizer import Recognizer
+        st = State(UsageDB(Path(tempfile.mkdtemp()) / "u.json"), icons=IconDB(Path(tempfile.mkdtemp())))
+        rec = Recognizer(st, lambda: {})
+        rec.portraits = IconDB(Path(tempfile.mkdtemp()))
+
+        def face(bg, dx=0):
+            img = Image.new("RGB", (64, 64), bg)
+            ImageDraw.Draw(img).ellipse((16 + dx, 12, 48 + dx, 52), fill=(230, 200, 60))
+            return img
+        pink, blue = (200, 40, 120), (90, 80, 200)
+        self.assertTrue(rec.add_portrait(face(pink), "ガブリアス", "opp"))
+        self.assertFalse(rec.add_portrait(face(pink, dx=6), "Garchomp", "opp"))  # 相手側はもう 1 枚ある
+        self.assertTrue(rec.add_portrait(face(blue), "ガブリアス", "me"))         # 自分側は別に 1 枚
+        self.assertTrue(rec.add_portrait(face(pink, dx=6), "ガブリアス", "opp", force=True))  # 手動は入れ替え
+        self.assertEqual(sorted(it["side"] for it in rec.portraits.list()), ["me", "opp"])
+        # 以前の版の (側の記録が無い) 顔画像は背景の色で判断する
+        iid = rec.portraits.add(face(blue), "リザードン")
+        self.assertEqual(rec._portrait_side(next(it for it in rec.portraits.list() if it["id"] == iid)), "me")
