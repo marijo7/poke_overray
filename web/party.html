@@ -14,11 +14,14 @@
     label=0            「自分」「相手」の見出しを非表示
     font=メイリオ / gfont=M PLUS Rounded 1c / fontfile=MyFont.ttf   フォントの変更 (font.js 参照)
     scale=1.2 / theme=light   (ソースの大きさに収まらないときは自動で縮小)
+    alpha=0.6          背景の不透明度 (0〜1。既定: 黒 0.82 / 白 0.72)
 -->
 <style>
   :root {
     --font-default: "BIZ UDPGothic", "Yu Gothic UI", "Meiryo", "Hiragino Sans", sans-serif;
-    --bg: rgba(16, 18, 28, 0.82);
+    --bg-rgb: 16, 18, 28;
+    --bg-a: 0.82;
+    --bg: rgba(var(--bg-rgb), var(--bg-a));
     --tile: rgba(255, 255, 255, 0.07);
     --fg: #f4f6fb;
     --sub: #a9b0c4;
@@ -29,13 +32,18 @@
     --scale: 1;
   }
   :root[data-theme="light"] {
-    --bg: rgba(250, 251, 255, 0.92);
-    --tile: rgba(0, 0, 0, 0.05);
+    --bg-a: 0.72;  /* 少し透けさせる (URL の alpha= で変更可) */
+    /* すりガラス風: 上は明るく、下ほど透ける */
+    --bg: linear-gradient(180deg, rgba(255, 255, 255, calc(var(--bg-a) + 0.1)), rgba(232, 238, 255, calc(var(--bg-a) - 0.12)));
+    --glass-edge: rgba(255, 255, 255, 0.85);
+    --tile: rgba(255, 255, 255, 0.45);
     --fg: #1b1f2c;
     --sub: #5b6377;
     --border: rgba(0, 0, 0, 0.12);
   }
   html, body { margin: 0; background: transparent; overflow: hidden; }
+  :root[data-theme="light"] .party { border-color: var(--glass-edge);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.95); }
   body { font-family: var(--font, var(--font-default)); font-weight: var(--font-weight, 400); color: var(--fg); zoom: var(--scale); }
   #root { display: flex; flex-direction: column; gap: 10px; padding: 8px; align-items: flex-start; }
   #root.column { flex-direction: row; align-items: flex-start; }
@@ -76,6 +84,7 @@
   if (q.get("size")) document.documentElement.style.setProperty("--size", parseInt(q.get("size"), 10) + "px");
   if (q.get("scale")) document.documentElement.style.setProperty("--scale", q.get("scale"));
   if (q.get("theme")) document.documentElement.dataset.theme = q.get("theme");
+  if (q.get("alpha")) document.documentElement.style.setProperty("--bg-a", Math.min(1, Math.max(0, parseFloat(q.get("alpha")))));
   const showLabel = q.get("label") !== "0";
   const SIZE = 6;
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
