@@ -242,7 +242,7 @@ class State:
                        for v in self.unknown_nicks.values()]
             dbg = {k: v for k, v in self.debug.items() if k == "preview" or k.startswith(("my", "icon"))}
             return {"version": self.version, "slots": slots, "parties": parties, "unknown_nicks": unknown,
-                    "preview_debug": dbg,
+                    "preview_debug": dbg, "hud_debug": self.debug.get("hud"),
                     "icon_guesses": guesses,
                     "history": parties["opp"],  # 旧形式との互換
                     "status": dict(self.status), "perf": dict(self.perf), "usage_meta": self.usage.meta}
@@ -271,6 +271,8 @@ class Recognizer(threading.Thread):
         self.region_votes = {}      # 対戦画面の別の名前欄の位置で多く読めた回数
         self.autofit_job = None     # 設定画面から頼まれた範囲の自動調整
         self.last_hud_alt_try = 0.0
+        self.last_hud_name_try = 0.0
+        self.hud_bypass = None      # パネルの判定を使わない対戦 (battle_no)
         self.last_layout_try = 0.0
         self.battle_seen = False    # 前の選出画面のあと、対戦画面でポケモンを読み取ったか (= 次の選出画面は新しい対戦)
         self.my_icon_cache = {}     # 選出画面の自分のポケモンの絵の判定結果 (対戦ごと)
@@ -730,8 +732,12 @@ class Recognizer(threading.Thread):
         たまたま名前欄の位置にあるポケモンの名前を読まないようにする。見本が無い配置では常に True。"""
         from .autofit import battle_hud_visible
         from .config import PRESETS
+        if not cfg.get("battle_check", True) or self.hud_bypass == self.battle_no:
+            return True
         layout = cfg.get("layout")
-        vis = battle_hud_visible(frame, cfg["regions"], layout)
+        scores = {}
+        vis = battle_hud_visible(frame, cfg["regions"], layout, last_scores=scores)
+        self.state.debug["hud"] = {"visible": vis, "scores": scores}
         if vis is None or vis:
             return True
         # 名前欄の位置が合っていない (別の機種の配置) だけかもしれないので、ときどき別の配置でも確かめる
@@ -742,7 +748,27 @@ class Recognizer(threading.Thread):
             for regions in [preset.get("regions")] + list(preset.get("regions_alt") or []):
                 if regions and regions != cfg["regions"] and battle_hud_visible(frame, regions, layout):
                     return True
+        # 念のため: パネルの判定が合わなくても、選出画面で分かった両者のパーティのポケモンの名前が
+        # 自分側・相手側の両方ではっきり読めれば対戦画面とみなし、この対戦の間は判定を使わない
+        if now - self.last_hud_name_try >= 3:
+            self.last_hud_name_try = now
+            if self.names_match_parties(frame, cfg):
+                self.hud_bypass = self.battle_no
+                log.warning("対戦画面の判定 (パネルの一致度 %s) が合わないため、この対戦では名前が読めたら読み取ります", scores)
+                return True
         return False
+
+    def names_match_parties(self, frame, cfg):
+        scale = cfg["ocr"].get("scale", getattr(self.ocr, "default_scale", 2.0))
+        usage = self.state.usage
+        ok = set()
+        for r in cfg["regions"]:
+            side = r.get("side", "opp")
+            party = {resolve(m, usage).get("species") for m in self.state.parties.get(side, [])}
+            read = self.read_region(frame, r, scale)
+            if read and read[0] and read[1] >= 0.9 and read[0] in party:
+                ok.add(side)
+        return ok == {"opp", "me"}
 
     def process_battle(self, frame, cfg, scale):
         if not self.battle_screen(frame, cfg):

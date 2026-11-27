@@ -365,7 +365,7 @@ def _template_small(layout, rid):
     return _TPL_CACHE[key]
 
 
-def panel_score(frame, r, layout):
+def panel_score(frame, r, layout, s0=None):
     """名前欄 r のまわりに、対戦画面のパネルの枠が写っているか (見本との一致度 -1〜1)。見本が無ければ None。
     r は今の設定の範囲 (自動調整・手での調整・別の配置で、見本を作った範囲から位置や大きさが少しずれていてもよい)。"""
     from .config import PRESETS
@@ -376,12 +376,16 @@ def panel_score(frame, r, layout):
         return None
     W, H = frame.size
     rw, rh = preset["fit"]["battle_ref_size"]
-    s0 = (r["h"] * H) / (ref["h"] * rh)  # 見本を作った画面と比べた大きさ (の目安)
+    if s0 is None:
+        s0 = (r["h"] * H) / (ref["h"] * rh)  # 見本を作った画面と比べた大きさ (の目安)
     th, tw = t["tpl"].shape[:2]
     best = -2.0
-    for s in (s0 * 0.86, s0 * 0.93, s0, s0 * 1.07, s0 * 1.14):
+    # 名前欄の左端と上下の真ん中を基準に置く (手で合わせた範囲は高さがまちまちなので、上端は使わない)
+    cy = (r["y"] + r["h"] / 2) * H
+    ref_cy = (ref["y"] + ref["h"] / 2) * rh
+    for s in (s0 * 0.8, s0 * 0.87, s0 * 0.93, s0, s0 * 1.07, s0 * 1.14, s0 * 1.22):
         x = r["x"] * W - s * (ref["x"] * rw - t["box"][0])
-        y = r["y"] * H - s * (ref["y"] * rh - t["box"][1])
+        y = cy - s * (ref_cy - t["box"][1])
         f = t["k"] / s  # 今の画面 → 見本の縮尺
         span = 0.35 * th / f  # 位置のずれの許容 (パネルの高さの 3〜4 割)
         box = (int(x - span), int(y - span), int(x + span + tw / f) + 1, int(y + span + th / f) + 1)
@@ -392,15 +396,42 @@ def panel_score(frame, r, layout):
     return best
 
 
-def battle_hud_visible(frame, regions, layout, need=2, thr=0.65):
+def side_scales(frame, regions, layout):
+    """自分側・相手側それぞれ、名前欄 2 つの間隔から、見本を作った画面と比べた大きさを出す。
+    (名前欄の高さは手で合わせると人によって違うが、2 つの間隔はほとんど変わらない)"""
+    from .config import PRESETS
+    preset = PRESETS.get(layout) or {}
+    refs = {r["id"]: r for r in preset.get("regions", [])}
+    if not preset.get("fit"):
+        return {}
+    rw = preset["fit"]["battle_ref_size"][0]
+    out = {}
+    for side in ("opp", "me"):
+        rs = sorted((r for r in regions if r.get("side", "opp") == side and r["id"] in refs), key=lambda r: r["x"])
+        if len(rs) >= 2:
+            a, b = rs[0], rs[-1]
+            d_ref = (refs[b["id"]]["x"] - refs[a["id"]]["x"]) * rw
+            if d_ref > 0:
+                s = (b["x"] - a["x"]) * frame.width / d_ref
+                if 0.2 < s < 5:
+                    out[side] = s
+    return out
+
+
+def battle_hud_visible(frame, regions, layout, need=2, thr=0.65, last_scores=None):
     """対戦画面の名前欄のパネルが need 個以上写っているか。見本が無い (判定できない) ときは None。
     実測: 対戦画面は 3〜4 個が 0.68 以上 (位置が少しずれた設定でも)、
     選出画面・メニュー・ボックスは全部 0.59 以下だった。"""
     hits, known = 0, False
     if frame.height > 600:  # 判定は小さい画像で十分 (毎フレーム使うので軽くする)
         frame = frame.resize((round(frame.width * 600 / frame.height), 600), Image.BILINEAR)
+    scales = side_scales(frame, regions, layout)
+    scores = {}
     for r in regions:
-        sc = panel_score(frame, r, layout)
+        sc = panel_score(frame, r, layout, scales.get(r.get("side", "opp")))
+        scores[r["id"]] = None if sc is None else round(sc, 2)
+        if last_scores is not None:
+            last_scores.update(scores)
         if sc is None:
             continue
         known = True

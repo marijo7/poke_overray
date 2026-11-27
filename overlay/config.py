@@ -24,6 +24,9 @@ DEFAULT_CONFIG = {
     "ocr": {"backend": "auto", "lang": "ja", "device": "dml", "threads": 1},
     "interval_sec": 0.5,
     "confirm_frames": 2,
+    # 対戦画面の名前欄のパネルが写っているときだけ名前を読む (対戦後のメニュー等で誤認識しないため)。
+    # 対戦中に読まなくなる場合は false にすると、この判定をしない
+    "battle_check": True,
     "min_ratio": 0.72,
     "server": {"host": "127.0.0.1", "port": 8765},
     # 採用率データの取得元。source: championsbattledata (性格・能力ポイントあり、毎日更新) / pikalytics

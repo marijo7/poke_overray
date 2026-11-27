@@ -408,6 +408,13 @@
   };
 
   // ---- 選出画面の読み取り結果 (うまくいかないときの確認用) ----
+  // 対戦画面の判定 (名前欄のパネルの一致度。0.65 以上が 2 つ以上で対戦画面)
+  function hudText(h) {
+    if (!h || !h.scores) return "";
+    const v = Object.entries(h.scores).map(([k, x]) => `${k} ${x == null ? "-" : x.toFixed(2)}`).join(" / ");
+    return ` <span class="hint" style="margin:0" title="0.65 以上が 2 つ以上で対戦画面と判断">(パネル一致度 ${esc(v)})</span>`;
+  }
+
   function renderPvDebug(d, status) {
     const m = d.preview;
     if (!m) { $("pvdebug").innerHTML = "読み取り結果: まだ画面を読んでいません"; return; }
@@ -575,7 +582,7 @@
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
       const s = st.status, m = st.usage_meta || {};
       $("status").innerHTML = `
-        <span>画面 <b>${esc(s.screen || "-")}</b></span>${s.battle ? `<span>対戦 <b>${esc(s.battle)}</b></span>` : ""}<span>取得元 <b>${esc(s.capture)}</b></span><span>OCR <b>${esc(s.ocr)}</b></span><span><b>${s.fps}</b> fps</span>
+        <span>画面 <b>${esc(s.screen || "-")}</b>${hudText(st.hud_debug)}</span>${s.battle ? `<span>対戦 <b>${esc(s.battle)}</b></span>` : ""}<span>取得元 <b>${esc(s.capture)}</b></span><span>OCR <b>${esc(s.ocr)}</b></span><span><b>${s.fps}</b> fps</span>
         <span title="画面取得 / 文字認識 にかかった時間 (1回あたり)">処理時間 <b>${fmt(st.perf.grab_ms)}</b> / <b>${fmt(st.perf.ocr_ms)}</b> ms</span>
         <span title="このプログラム全体の CPU 使用率 (PC 全体に対する割合。タスクマネージャーと同じ基準)">CPU <b>${st.perf.cpu_pct ?? "-"}</b>%</span>
         <span>データ <b>${m.format ? esc(m.format + " " + (m.data_date || "")) : "なし"}</b></span>
