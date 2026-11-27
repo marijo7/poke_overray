@@ -120,3 +120,30 @@ class TestBuiltinTypeIcons(unittest.TestCase):
         keys = {it["key"] for it in db.list()}
         self.assertTrue({"water", "ghost", "fire", "dragon", "fairy"} <= keys)
         self.assertEqual(len(keys), 17)  # むし以外
+
+
+class TestTypeIconsFromSource(unittest.TestCase):
+    def test_round_icon_matches_square_game_icon(self):
+        """データ元の丸いアイコンと、ゲームの角の丸い四角いアイコン (記号の大きさも違う) を、色と記号の形で見分ける"""
+        from overlay.type_icons import TypeIcons
+
+        def icon(color, shape, round_icon, size):
+            img = Image.new("RGBA", (size, size), (0, 0, 0, 0) if round_icon else (*color, 255))
+            d = ImageDraw.Draw(img)
+            if round_icon:
+                d.ellipse((0, 0, size - 1, size - 1), fill=(*color, 255))
+            m = size * (0.3 if round_icon else 0.15)  # ゲームの方が記号が大きい
+            box = (m, m, size - m, size - m)
+            if shape == "drop":
+                d.polygon([(size / 2, box[1]), (box[2], box[3]), (box[0], box[3])], fill=(255, 255, 255, 255))
+            else:
+                d.rectangle(box, fill=(255, 255, 255, 255))
+            return img
+
+        d = Path(tempfile.mkdtemp())
+        icon((40, 130, 240), "drop", True, 64).save(d / "water.png")
+        icon((40, 130, 240), "box", True, 64).save(d / "blockwater.png")
+        icon((240, 60, 40), "drop", True, 64).save(d / "fire.png")
+        t = TypeIcons(d)
+        self.assertEqual(t.classify(icon((45, 125, 235), "drop", False, 40))[0], "water")
+        self.assertEqual(t.classify(icon((235, 65, 45), "drop", False, 40))[0], "fire")

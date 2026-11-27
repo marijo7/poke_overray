@@ -20,6 +20,7 @@ from .gender import detect_gender
 from .names import (NameMatcher, base_stats, form_abilities_ja, gender_variant, is_mega, mega_forms, normalize,
                     resolve, type_name_ja, types_of, with_gender)
 from .nicknames import NicknameDB, clean_nick, looks_like_name, nick_key
+from .type_icons import TypeIcons
 from .ocr import create_ocr, preprocess
 
 log = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class State:
         self.type_db = IconDB(ICON_DIR.parent / "types") if icons is not None else None  # タイプアイコン (学習)
         # 最初から入っているタイプアイコン (スマホ版・Switch 版のスクリーンショットから。むし以外の 17 タイプ)
         self.type_builtin = IconDB(ICON_DIR.parent / "types_builtin") if icons is not None else None
+        self.type_icons = TypeIcons()  # データ元のタイプアイコン 18 種 (むしも含む)
         self.icon_guess = {}   # uid -> {"types": [...], "cands": [...], "guess": キー or None}: タイプからの推定
         self.mega_used = {}    # side -> メガシンカしたポケモン (1 回の対戦で 1 人 1 匹まで)
         self.member_uid = {}   # 相手パーティの登録 -> 選出画面のアイコン (uid)。設定画面の「修正」に使う
@@ -682,7 +684,7 @@ class Recognizer(threading.Thread):
         1 つも読めなければ None"""
         crops = self.state.type_crops.get(uid)
         dbs = [d for d in (self.state.type_db, self.state.type_builtin) if d is not None and d.items]
-        if not crops or not dbs:
+        if not crops:
             return None
 
         def is_empty(img):  # 1 タイプのポケモンの左側は何も無い (白い模様が無い)
@@ -691,8 +693,11 @@ class Recognizer(threading.Thread):
 
         types = []
         for outer, inner in ([crops[1]] if is_empty(crops[0][1]) else crops):
-            t, score = max((d.match(outer) for d in dbs), key=lambda x: x[1])
-            types.append(t if t and score >= 0.85 else None)  # 0.85 未満: まだ覚えていないタイプ (むし等)
+            t, score = max((d.match(outer) for d in dbs), key=lambda x: x[1]) if dbs else (None, 0.0)
+            if not t or score < 0.85:
+                # 覚えた見た目と合わない → データ元のタイプアイコン (色と記号の形) で判定
+                t, _ = self.state.type_icons.classify(inner)
+            types.append(t)
         return types if any(types) else None
 
     def guess_by_types(self, frame, pv, i, n, uid):

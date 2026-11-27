@@ -130,6 +130,29 @@ def cbd_entry(fmt, rank, item):
 ICON_DIR = ROOT / "data" / "champions_icons"
 
 
+TYPE_NAMES = ["Normal", "Fire", "Water", "Electric", "Grass", "Ice", "Fighting", "Poison", "Ground", "Flying",
+              "Psychic", "Bug", "Rock", "Ghost", "Dragon", "Dark", "Steel", "Fairy"]
+
+
+def fetch_type_icons(delay=0.2):
+    """選出画面のタイプの判定に使う、タイプアイコン (18 種) をデータ元から取得する (手元に無いものだけ)。"""
+    d = ICON_DIR / "types"
+    d.mkdir(parents=True, exist_ok=True)
+    got = 0
+    for t in TYPE_NAMES:
+        p = d / f"{t.lower()}.png"
+        if p.exists():
+            continue
+        req = urllib.request.Request(f"https://championsbattledata.com/pokemon_champions_assets/types/{t}.png",
+                                     headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            p.write_bytes(r.read())
+        got += 1
+        time.sleep(delay)
+    if got:
+        print(f"タイプアイコンを取得しました ({got} 種)")
+
+
 def fetch_champion_icons(roster, delay=0.1):
     """選出画面のアイコン照合に使う、Champions のポケモン画像を取得する (初回のみ。以後は増えた分だけ)。
 
@@ -282,6 +305,10 @@ def update(source=None, fmt=None, limit=None, delay=0.5, out=None, force=False):
     out = out or ROOT / "data" / "usage.json"
 
     hour_utc = float(ucfg.get("update_hour_utc", 5.0))
+    try:
+        fetch_type_icons()  # 採用率データが取得済みでも、タイプアイコンが無ければ取る (初回だけ)
+    except Exception as e:
+        print(f"タイプアイコンを取得できませんでした: {e}")
     rk, generated = None, None
     if source == "championsbattledata":
         # 順位の一覧 (約 30KB) だけ先に取り、データ元のデータがいつ作られたかを見る
