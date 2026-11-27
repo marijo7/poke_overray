@@ -415,12 +415,15 @@ def panel_score(frame, r, layout, s0=None):
     W, H = frame.size
     if s0 is None:
         s0 = (r["h"] * H) / (ref["h"] * rh)  # 見本を作った画面と比べた大きさ (の目安)
+        factors = (0.8, 0.87, 0.93, 1.0, 1.07, 1.14, 1.22)
+    else:
+        factors = (0.93, 1.0, 1.07)  # 名前欄の間隔から出した大きさは正確なので、近くだけ試す
     th, tw = t["tpl"].shape[:2]
     best = -2.0
     # 名前欄の左端と上下の真ん中を基準に置く (手で合わせた範囲は高さがまちまちなので、上端は使わない)
     cy = (r["y"] + r["h"] / 2) * H
     ref_cy = (ref["y"] + ref["h"] / 2) * rh
-    for s in (s0 * 0.8, s0 * 0.87, s0 * 0.93, s0, s0 * 1.07, s0 * 1.14, s0 * 1.22):
+    for s in (s0 * f for f in factors):
         x = r["x"] * W - s * (ref["x"] * rw - t["box"][0])
         y = cy - s * (ref_cy - t["box"][1])
         f = t["k"] / s  # 今の画面 → 見本の縮尺
@@ -462,7 +465,9 @@ def battle_hud_visible(frame, regions, layout, need=2, thr=0.65, last_scores=Non
         frame = frame.resize((round(frame.width * 600 / frame.height), 600), Image.BILINEAR)
     scales = side_scales(frame, regions, layout)
     scores = {}
-    for r in regions:
+    for n, r in enumerate(regions):
+        if known and hits + (len(regions) - n) < need:
+            break  # 残りが全部合っても足りない → 対戦画面ではない (残りは調べない)
         sc = panel_score(frame, r, layout, scales.get(r.get("side", "opp")))
         scores[r["id"]] = None if sc is None else round(sc, 2)
         if last_scores is not None:

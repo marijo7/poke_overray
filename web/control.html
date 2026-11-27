@@ -420,7 +420,8 @@
     if (!m) { $("pvdebug").innerHTML = "読み取り結果: まだ画面を読んでいません"; return; }
     const how = { image: "覚えたマーカーの画像と一致", ocr: "文字", "ocr-white": "白い文字だけを取り出して文字", layout: "別の画面レイアウトで" }[m.how] || "";
     const lines = [`${status.layout_switched ? `<b class="ok">画面に合わせて読み取り範囲を「${esc(status.layout_switched)}」に自動で切り替えました</b><br>` : ""}選出画面の判定: ${m.found ? '<b class="ok">選出画面</b>' : '<b class="ng">選出画面ではない</b>'}
-      ${m.found ? `(${how}で判定)` : `(マーカーの文字: 「${esc(m.text || "読めず")}」 ← 「選出してください」が読めると選出画面と判定。
+      ${m.found ? `(${how}で判定)` : m.how === "no-panels" ? "(相手側の赤い枠が無いので、文字は読んでいません)"
+        : `(マーカーの文字: 「${esc(m.text || "読めず")}」 ← 「選出してください」が読めると選出画面と判定。
         読めない場合は、選出画面のときに「今の画面を選出画面として覚える」を押してください)`}
       ${m.has_template ? "・マーカーの画像を覚えています" : ""}`];
     const my = [...Array(6).keys()].map((i) => d["my" + i]).filter(Boolean);

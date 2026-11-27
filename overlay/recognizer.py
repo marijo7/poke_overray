@@ -273,6 +273,7 @@ class Recognizer(threading.Thread):
         self.last_hud_alt_try = 0.0
         self.last_hud_name_try = 0.0
         self.last_hud_learn = 0.0
+        self._select_check = (None, False)
         self.last_layout_try = 0.0
         self.battle_seen = False    # 前の選出画面のあと、対戦画面でポケモンを読み取ったか (= 次の選出画面は新しい対戦)
         self.my_icon_cache = {}     # 選出画面の自分のポケモンの絵の判定結果 (対戦ごと)
@@ -441,6 +442,8 @@ class Recognizer(threading.Thread):
             _, score = self.marker_db.match(outer, keys={layout})
             if score >= 0.85:
                 return True, "", "image"
+        if not self.looks_like_select(frame):
+            return False, "", "no-panels"  # 相手側の赤い枠が無い → 選出画面ではない (文字認識しない)
         keys = pv.get("keywords", ["選出"])
         text = "".join(self._ocr_rect(frame, pv["marker"], scale))
         how = "ocr"
@@ -456,6 +459,18 @@ class Recognizer(threading.Thread):
             self.marker_db.add(inner, layout)
             log.info("選出画面のマーカーの画像を覚えました (%s)", layout)
         return True, text, how
+
+    def looks_like_select(self, frame):
+        """選出画面らしいか (相手側の赤い枠が縦に並んでいるか)。色だけで調べるので軽い (1 回 20〜40ms)。
+        実測: 選出画面 4 枚はすべてあり、対戦画面・メニュー・ボックスはすべてなし。
+        同じフレームで何度も呼ばれるので、結果を覚えておく。"""
+        if self._select_check[0] is frame:
+            return self._select_check[1]
+        from .autofit import find_opp_panels
+        small = frame.resize((max(1, round(frame.width * 360 / frame.height)), 360), Image.BILINEAR)
+        ok = find_opp_panels(small) is not None
+        self._select_check = (frame, ok)
+        return ok
 
     def learn_marker(self):
         """設定画面のボタン: 今の画面を選出画面として、マーカーの画像を覚える (文字認識がうまくいかない場合用)。"""
@@ -490,6 +505,8 @@ class Recognizer(threading.Thread):
         """今の設定 (例: スマホ版) では選出画面の文字が読めないとき、他の画面 (Switch 版) の位置でも読んでみる。
         2 回続けてそちらで読めたら、読み取り範囲をその画面用に切り替える。"""
         from .config import PRESETS, apply_preset
+        if not self.looks_like_select(frame):
+            return False  # 選出画面ではない (文字認識しない)
         for name, preset in PRESETS.items():
             if name == cfg.get("layout"):
                 continue
@@ -751,7 +768,9 @@ class Recognizer(threading.Thread):
         # パネルの見本が合わなくても、選出画面で分かった両者のパーティのポケモンの名前が
         # 自分側・相手側の両方ではっきり読めれば対戦画面。そのときの画面からパネルの見本を作り直して、
         # 以後はそれで判定する (使う人のキャプチャの画質・機種に合わせる)
-        if now - self.last_hud_name_try >= 3:
+        from .autofit import has_user_templates
+        # 使う人の画面から作った見本があれば判定はほぼ合うので、名前を読んで確かめるのはたまにでよい
+        if now - self.last_hud_name_try >= (15 if has_user_templates(layout) else 3):
             self.last_hud_name_try = now
             if self.names_match_parties(frame, cfg):
                 from .autofit import save_user_templates
