@@ -90,3 +90,33 @@ class TestTypes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPartialTypes(unittest.TestCase):
+    def test_types_match(self):
+        from overlay.recognizer import types_match
+        self.assertTrue(types_match(["water", "ghost"], ["water", "ghost"]))
+        self.assertTrue(types_match(["water", "ghost"], [None, "ghost"]))   # 左が読めなかった
+        self.assertFalse(types_match(["ghost", "water"], [None, "ghost"]))  # 並び (左右) が違う
+        self.assertFalse(types_match(["ghost"], [None, "ghost"]))           # タイプの数が違う
+        self.assertFalse(types_match(["water", "ghost"], None))
+
+    def test_water_ghost_is_only_basculegion(self):
+        """みず/ゴーストは Champions ではイダイトウ (オス・メス) だけ → タイプが読めれば 1 匹に決まる"""
+        from overlay.names import resolve, types_of
+        from overlay.recognizer import types_match
+        from overlay.usage import UsageDB
+        u = UsageDB()
+        if not u.roster():
+            self.skipTest("採用率データ (data/usage.json) が無い")
+        hits = {resolve(k, u)["species"] for k in u.roster() if types_match(types_of(k, u), ["water", "ghost"])}
+        self.assertEqual(hits, {"イダイトウ"})
+
+
+class TestBuiltinTypeIcons(unittest.TestCase):
+    def test_builtin_types_present(self):
+        from overlay.icons import ICON_DIR, IconDB
+        db = IconDB(ICON_DIR.parent / "types_builtin")
+        keys = {it["key"] for it in db.list()}
+        self.assertTrue({"water", "ghost", "fire", "dragon", "fairy"} <= keys)
+        self.assertEqual(len(keys), 17)  # むし以外

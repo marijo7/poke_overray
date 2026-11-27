@@ -38,6 +38,8 @@ class State:
         self.icon_crops = {}   # 未登録アイコンの切り出し画像 uid -> PIL.Image
         self.type_crops = {}   # uid -> ((左のタイプ 余白付き, 余白なし), (右のタイプ 余白付き, 余白なし))
         self.type_db = IconDB(ICON_DIR.parent / "types") if icons is not None else None  # タイプアイコン (学習)
+        # 最初から入っているタイプアイコン (スマホ版・Switch 版のスクリーンショットから。むし以外の 17 タイプ)
+        self.type_builtin = IconDB(ICON_DIR.parent / "types_builtin") if icons is not None else None
         self.icon_guess = {}   # uid -> {"types": [...], "cands": [...], "guess": キー or None}: タイプからの推定
         self.mega_used = {}    # side -> メガシンカしたポケモン (1 回の対戦で 1 人 1 匹まで)
         self.member_uid = {}   # 相手パーティの登録 -> 選出画面のアイコン (uid)。設定画面の「修正」に使う
@@ -115,10 +117,9 @@ class State:
             n = sum(1 for it in self.type_db.list() if it["key"] == t)
             if n >= 3:
                 continue
-            if n:
-                _, score = self.type_db.match(outer, keys={t})
-                if score >= 0.92:
-                    continue  # もう同じ見た目を覚えている
+            known = [d for d in (self.type_db, self.type_builtin) if d is not None and d.has_key(t)]
+            if any(d.match(outer, keys={t})[1] >= 0.92 for d in known):
+                continue  # もう同じ見た目を覚えている (最初から入っているものも含む)
             self.type_db.add(inner, t)
             log.info("タイプアイコンを記憶: %s", type_name_ja(t))
 
@@ -252,7 +253,7 @@ class State:
                                       guess=side == "opp" and m in guessed,
                                       uid=self.member_uid.get(m) if side == "opp" else None)
                                  for m in members]
-            guesses = {uid: {"types": [type_name_ja(t) for t in g["types"]],
+            guesses = {uid: {"types": [type_name_ja(t) if t else "?" for t in g["types"]],
                              "cands": [{"key": c, "display": self._resolve(c)["display"]} for c in g["cands"][:6]],
                              "guess": g.get("guess")}
                        for uid, g in self.icon_guess.items()}
@@ -676,9 +677,12 @@ class Recognizer(threading.Thread):
         return None
 
     def read_types(self, uid):
-        """タイプアイコン 2 つを、覚えたタイプアイコンと照合する。戻り値: タイプのリスト (読めなければ None)"""
-        crops, db = self.state.type_crops.get(uid), self.state.type_db
-        if not crops or db is None or not db.items:
+        """タイプアイコン 2 つを、覚えたタイプアイコン (と最初から入っているもの) と照合する。
+        戻り値: タイプのリスト (2 タイプなら [左, 右])。読めなかった方は None (例: [None, "ghost"])。
+        1 つも読めなければ None"""
+        crops = self.state.type_crops.get(uid)
+        dbs = [d for d in (self.state.type_db, self.state.type_builtin) if d is not None and d.items]
+        if not crops or not dbs:
             return None
 
         def is_empty(img):  # 1 タイプのポケモンの左側は何も無い (白い模様が無い)
@@ -687,11 +691,9 @@ class Recognizer(threading.Thread):
 
         types = []
         for outer, inner in ([crops[1]] if is_empty(crops[0][1]) else crops):
-            t, score = db.match(outer)
-            if not t or score < 0.85:
-                return None  # まだ覚えていないタイプ
-            types.append(t)
-        return types
+            t, score = max((d.match(outer) for d in dbs), key=lambda x: x[1])
+            types.append(t if t and score >= 0.85 else None)  # 0.85 未満: まだ覚えていないタイプ (むし等)
+        return types if any(types) else None
 
     def guess_by_types(self, frame, pv, i, n, uid):
         """未登録アイコンを推定する。
@@ -716,7 +718,7 @@ class Recognizer(threading.Thread):
             outer = crop_with_margin(frame, _lerp(pv["opp_first"], pv["opp_last"], i, n))[0]
         guess, cands, by = None, [], None
         if types:
-            cands, by = [k for k in roster if types_of(k, usage) == types], "type"
+            cands, by = [k for k in roster if types_match(types_of(k, usage), types)], "type"
             if len(cands) == 1:
                 guess = cands[0]
             elif cands and outer is not None and self.champ.available(cands):
@@ -740,7 +742,7 @@ class Recognizer(threading.Thread):
             guess = with_gender(guess, resolve(guess, usage)["species"], g, usage)
         self.state.icon_guess[uid] = {"types": types or [], "cands": cands, "guess": guess, "by": by}
         log.info("相手%d: %s → 候補 %s%s", i + 1,
-                 "タイプ " + "/".join(type_name_ja(t) for t in types) if types else "見た目",
+                 "タイプ " + "/".join(type_name_ja(t) if t else "?" for t in types) if types else "見た目",
                  "、".join(resolve(c, usage)["display"] for c in cands[:5]) or "なし",
                  f" → 推定 {resolve(guess, usage)['display']}" if guess else "")
         return guess
@@ -839,7 +841,8 @@ class Recognizer(threading.Thread):
         if len(uids) < 2:
             return
         types = types_of(key, usage)
-        uids = [u for u in uids if not (st.icon_guess.get(u) or {}).get("types") or st.icon_guess[u]["types"] == types]
+        uids = [u for u in uids if not (st.icon_guess.get(u) or {}).get("types")
+                or types_match(types, st.icon_guess[u]["types"])]
         if len(uids) == 1:
             st.label_icon(uids[0], key)
             log.info("対戦に出てきた %s を、タイプの合う未登録アイコンとして登録", info["display"])
@@ -1048,6 +1051,13 @@ class Recognizer(threading.Thread):
         if self.add_portrait(inner, label, force=True):
             log.info("顔画像を記憶 (手動): %s", label)
         return True
+
+def types_match(actual, read):
+    """ポケモンのタイプ actual が、選出画面で読んだタイプ read (読めなかった方は None) と合うか"""
+    if not actual or not read or len(actual) != len(read):
+        return False
+    return all(r is None or a == r for a, r in zip(actual, read))
+
 
 def _ema(prev, value, k=0.2):
     return round(value if prev is None else prev * (1 - k) + value * k, 1)
