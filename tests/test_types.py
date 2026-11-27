@@ -113,15 +113,6 @@ class TestPartialTypes(unittest.TestCase):
         self.assertEqual(hits, {"イダイトウ"})
 
 
-class TestBuiltinTypeIcons(unittest.TestCase):
-    def test_builtin_types_present(self):
-        from overlay.icons import ICON_DIR, IconDB
-        db = IconDB(ICON_DIR.parent / "types_builtin")
-        keys = {it["key"] for it in db.list()}
-        self.assertTrue({"water", "ghost", "fire", "dragon", "fairy"} <= keys)
-        self.assertEqual(len(keys), 17)  # むし以外
-
-
 class TestTypeIconsFromSource(unittest.TestCase):
     def test_round_icon_matches_square_game_icon(self):
         """データ元の丸いアイコンと、ゲームの角の丸い四角いアイコン (記号の大きさも違う) を、色と記号の形で見分ける"""

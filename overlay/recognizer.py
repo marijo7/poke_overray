@@ -39,8 +39,6 @@ class State:
         self.icon_crops = {}   # 未登録アイコンの切り出し画像 uid -> PIL.Image
         self.type_crops = {}   # uid -> ((左のタイプ 余白付き, 余白なし), (右のタイプ 余白付き, 余白なし))
         self.type_db = IconDB(ICON_DIR.parent / "types") if icons is not None else None  # タイプアイコン (学習)
-        # 最初から入っているタイプアイコン (スマホ版・Switch 版のスクリーンショットから。むし以外の 17 タイプ)
-        self.type_builtin = IconDB(ICON_DIR.parent / "types_builtin") if icons is not None else None
         self.type_icons = TypeIcons()  # データ元のタイプアイコン 18 種 (むしも含む)
         self.icon_guess = {}   # uid -> {"types": [...], "cands": [...], "guess": キー or None}: タイプからの推定
         self.mega_used = {}    # side -> メガシンカしたポケモン (1 回の対戦で 1 人 1 匹まで)
@@ -119,9 +117,8 @@ class State:
             n = sum(1 for it in self.type_db.list() if it["key"] == t)
             if n >= 3:
                 continue
-            known = [d for d in (self.type_db, self.type_builtin) if d is not None and d.has_key(t)]
-            if any(d.match(outer, keys={t})[1] >= 0.92 for d in known):
-                continue  # もう同じ見た目を覚えている (最初から入っているものも含む)
+            if self.type_db.has_key(t) and self.type_db.match(outer, keys={t})[1] >= 0.92:
+                continue  # もう同じ見た目を覚えている
             self.type_db.add(inner, t)
             log.info("タイプアイコンを記憶: %s", type_name_ja(t))
 
@@ -679,11 +676,11 @@ class Recognizer(threading.Thread):
         return None
 
     def read_types(self, uid):
-        """タイプアイコン 2 つを、覚えたタイプアイコン (と最初から入っているもの) と照合する。
+        """タイプアイコン 2 つを、覚えたタイプアイコン・データ元のタイプアイコンと照合する。
         戻り値: タイプのリスト (2 タイプなら [左, 右])。読めなかった方は None (例: [None, "ghost"])。
         1 つも読めなければ None"""
         crops = self.state.type_crops.get(uid)
-        dbs = [d for d in (self.state.type_db, self.state.type_builtin) if d is not None and d.items]
+        dbs = [d for d in (self.state.type_db,) if d is not None and d.items]
         if not crops:
             return None
 
