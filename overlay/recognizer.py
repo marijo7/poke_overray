@@ -272,7 +272,7 @@ class Recognizer(threading.Thread):
         self.autofit_job = None     # 設定画面から頼まれた範囲の自動調整
         self.last_hud_alt_try = 0.0
         self.last_hud_name_try = 0.0
-        self.hud_bypass = None      # パネルの判定を使わない対戦 (battle_no)
+        self.last_hud_learn = 0.0
         self.last_layout_try = 0.0
         self.battle_seen = False    # 前の選出画面のあと、対戦画面でポケモンを読み取ったか (= 次の選出画面は新しい対戦)
         self.my_icon_cache = {}     # 選出画面の自分のポケモンの絵の判定結果 (対戦ごと)
@@ -732,7 +732,7 @@ class Recognizer(threading.Thread):
         たまたま名前欄の位置にあるポケモンの名前を読まないようにする。見本が無い配置では常に True。"""
         from .autofit import battle_hud_visible
         from .config import PRESETS
-        if not cfg.get("battle_check", True) or self.hud_bypass == self.battle_no:
+        if not cfg.get("battle_check", True):
             return True
         layout = cfg.get("layout")
         scores = {}
@@ -748,13 +748,18 @@ class Recognizer(threading.Thread):
             for regions in [preset.get("regions")] + list(preset.get("regions_alt") or []):
                 if regions and regions != cfg["regions"] and battle_hud_visible(frame, regions, layout):
                     return True
-        # 念のため: パネルの判定が合わなくても、選出画面で分かった両者のパーティのポケモンの名前が
-        # 自分側・相手側の両方ではっきり読めれば対戦画面とみなし、この対戦の間は判定を使わない
+        # パネルの見本が合わなくても、選出画面で分かった両者のパーティのポケモンの名前が
+        # 自分側・相手側の両方ではっきり読めれば対戦画面。そのときの画面からパネルの見本を作り直して、
+        # 以後はそれで判定する (使う人のキャプチャの画質・機種に合わせる)
         if now - self.last_hud_name_try >= 3:
             self.last_hud_name_try = now
             if self.names_match_parties(frame, cfg):
-                self.hud_bypass = self.battle_no
-                log.warning("対戦画面の判定 (パネルの一致度 %s) が合わないため、この対戦では名前が読めたら読み取ります", scores)
+                from .autofit import save_user_templates
+                if now - self.last_hud_learn >= 60:
+                    self.last_hud_learn = now
+                    n = save_user_templates(layout, frame, cfg["regions"])
+                    log.warning("対戦画面の判定 (パネルの一致度 %s) が合わなかったので、今の画面からパネルの見本を作りました (%d 個)",
+                                scores, n)
                 return True
         return False
 
@@ -766,7 +771,13 @@ class Recognizer(threading.Thread):
             side = r.get("side", "opp")
             party = {resolve(m, usage).get("species") for m in self.state.parties.get(side, [])}
             read = self.read_region(frame, r, scale)
-            if read and read[0] and read[1] >= 0.9 and read[0] in party:
+            if not read:
+                continue
+            sp = read[0] if read[1] >= 0.8 else None
+            if not sp and read[2]:  # 登録済みのニックネーム
+                nick = self.state.nicknames.match(read[3])
+                sp = resolve(nick, usage).get("species") if nick else None
+            if sp in party:
                 ok.add(side)
         return ok == {"opp", "me"}
 

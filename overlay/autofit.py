@@ -287,8 +287,33 @@ def load_template(layout, rid):
     if not p.exists():
         return None
     z = np.load(p)
-    return {"tpl": z["tpl"].astype(np.float32), "mask": z["mask"].astype(np.float32),
-            "box": tuple(int(v) for v in z["box"]), "k": float(z["k"])}
+    t = {"tpl": z["tpl"].astype(np.float32), "mask": z["mask"].astype(np.float32),
+         "box": tuple(int(v) for v in z["box"]), "k": float(z["k"])}
+    if "ref" in z:  # 使う人の画面から作った見本: 作ったときの名前欄の範囲と画面の大きさ
+        x, y, w, h = (float(v) for v in z["ref"])
+        t["ref"], t["ref_size"] = {"x": x, "y": y, "w": w, "h": h}, tuple(int(v) for v in z["ref_size"])
+    return t
+
+
+def save_user_templates(layout, frame, regions):
+    """使う人の対戦画面 (名前が読めて対戦画面だと確かめられたもの) から、パネルの見本を作って保存する。
+    以後の対戦画面の判定は、こちらを優先して使う (キャプチャの画質や機種の違いに合わせるため)。"""
+    FIT_DIR.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for r in regions:
+        if not r.get("portrait") or not r.get("gender"):
+            continue
+        t = make_panel_template(frame, r)
+        np.savez_compressed(FIT_DIR / f"user_{layout}_{r['id']}.npz", tpl=t["tpl"], mask=t["mask"],
+                            box=np.array(t["box"]), k=np.array(t["k"]),
+                            ref=np.array([r["x"], r["y"], r["w"], r["h"]]), ref_size=np.array(frame.size))
+        n += 1
+    _TPL_CACHE.clear()
+    return n
+
+
+def has_user_templates(layout):
+    return any(FIT_DIR.glob(f"user_{layout}_*.npz"))
 
 
 def _ncc_search(area, tpl, mask):
@@ -365,17 +390,29 @@ def _template_small(layout, rid):
     return _TPL_CACHE[key]
 
 
+def _ref_template(layout, rid):
+    """名前欄 rid のパネルの見本と、見本を作ったときの名前欄の範囲・画面の大きさ。
+    使う人の画面から作った見本があればそちら、無ければプリセットの見本。戻り値: (見本, 範囲, (幅, 高さ)) / None"""
+    t = _template_small(f"user_{layout}", rid)
+    if t is not None and t.get("ref"):
+        return t, t["ref"], t["ref_size"]
+    from .config import PRESETS
+    preset = PRESETS.get(layout) or {}
+    ref = next((x for x in preset.get("regions", []) if x["id"] == rid), None)
+    t = _template_small(layout, rid)
+    if not ref or not t or not preset.get("fit"):
+        return None
+    return t, ref, tuple(preset["fit"]["battle_ref_size"])
+
+
 def panel_score(frame, r, layout, s0=None):
     """名前欄 r のまわりに、対戦画面のパネルの枠が写っているか (見本との一致度 -1〜1)。見本が無ければ None。
     r は今の設定の範囲 (自動調整・手での調整・別の配置で、見本を作った範囲から位置や大きさが少しずれていてもよい)。"""
-    from .config import PRESETS
-    preset = PRESETS.get(layout) or {}
-    ref = next((x for x in preset.get("regions", []) if x["id"] == r["id"]), None)
-    t = _template_small(layout, r["id"])
-    if not ref or not t or not preset.get("fit"):
+    found = _ref_template(layout, r["id"])
+    if not found:
         return None
+    t, ref, (rw, rh) = found
     W, H = frame.size
-    rw, rh = preset["fit"]["battle_ref_size"]
     if s0 is None:
         s0 = (r["h"] * H) / (ref["h"] * rh)  # 見本を作った画面と比べた大きさ (の目安)
     th, tw = t["tpl"].shape[:2]
@@ -399,18 +436,16 @@ def panel_score(frame, r, layout, s0=None):
 def side_scales(frame, regions, layout):
     """自分側・相手側それぞれ、名前欄 2 つの間隔から、見本を作った画面と比べた大きさを出す。
     (名前欄の高さは手で合わせると人によって違うが、2 つの間隔はほとんど変わらない)"""
-    from .config import PRESETS
-    preset = PRESETS.get(layout) or {}
-    refs = {r["id"]: r for r in preset.get("regions", [])}
-    if not preset.get("fit"):
-        return {}
-    rw = preset["fit"]["battle_ref_size"][0]
+    refs = {r["id"]: _ref_template(layout, r["id"]) for r in regions}
     out = {}
     for side in ("opp", "me"):
-        rs = sorted((r for r in regions if r.get("side", "opp") == side and r["id"] in refs), key=lambda r: r["x"])
+        rs = sorted((r for r in regions if r.get("side", "opp") == side and refs.get(r["id"])), key=lambda r: r["x"])
         if len(rs) >= 2:
             a, b = rs[0], rs[-1]
-            d_ref = (refs[b["id"]]["x"] - refs[a["id"]]["x"]) * rw
+            (_, ra, (rw, _)), (_, rb, (rw2, _)) = refs[a["id"]], refs[b["id"]]
+            if rw != rw2:
+                continue  # 見本を作った画面が違う (片方だけ使う人の画面から作った) ときは使わない
+            d_ref = (rb["x"] - ra["x"]) * rw
             if d_ref > 0:
                 s = (b["x"] - a["x"]) * frame.width / d_ref
                 if 0.2 < s < 5:

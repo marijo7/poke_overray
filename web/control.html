@@ -580,6 +580,11 @@
   async function tick() {
     try {
       const st = await (await fetch("/api/state", { cache: "no-store" })).json();
+      // ツールを更新したら、この画面も新しいものに読み込み直す (保存していない範囲の変更があるときは待つ)
+      if (st.app_version) {
+        if (window.__appVersion && window.__appVersion !== st.app_version && !dirty) location.reload();
+        if (!window.__appVersion || !dirty) window.__appVersion = st.app_version;
+      }
       const s = st.status, m = st.usage_meta || {};
       $("status").innerHTML = `
         <span>画面 <b>${esc(s.screen || "-")}</b>${hudText(st.hud_debug)}</span>${s.battle ? `<span>対戦 <b>${esc(s.battle)}</b></span>` : ""}<span>取得元 <b>${esc(s.capture)}</b></span><span>OCR <b>${esc(s.ocr)}</b></span><span><b>${s.fps}</b> fps</span>

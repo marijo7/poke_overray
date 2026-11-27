@@ -20,3 +20,4 @@ data/nicknames.json
 data/champions_icons/
 # 選出画面のマーカーの画像 (各自の環境で学習)
 data/markers/
+data/fit/user_*
