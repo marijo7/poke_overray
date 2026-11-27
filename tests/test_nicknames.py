@@ -120,3 +120,34 @@ class TestBattleLayoutAlt(unittest.TestCase):
         self.assertTrue(alts)
         for regions in alts:
             self.assertEqual([r["id"] for r in regions], [r["id"] for r in PRESETS["phone"]["regions"]])
+
+
+class TestFitToParty(unittest.TestCase):
+    def setUp(self):
+        from overlay.recognizer import Recognizer
+        self.st = State(usage(), nicknames=NicknameDB(Path(tempfile.mkdtemp()) / "n.json"))
+        self.rec = Recognizer(self.st, lambda: {})
+        self.st.set_party("me", ["Garchomp", "Armarouge", "Lucario", "nick:山田二郎"])
+        self.st.parties["opp"] = ["Charizard", "Armarouge", "Sneasler", "Sinistcha"]
+
+    def test_in_party_is_kept(self):
+        self.assertEqual(self.rec.fit_to_party("opp", "リザードン", 1.0, ["リザードン"])[0], "リザードン")
+
+    def test_misread_is_pulled_to_party(self):
+        # 読み違いで別のポケモンになった → パーティのいちばん近いポケモン
+        self.assertEqual(self.rec.fit_to_party("me", None, 0.0, ["プレンアルマ"])[0], "グレンアルマ")
+        self.assertEqual(self.rec.fit_to_party("opp", "リザードン", 0.8, ["リサードソ"])[0], "リザードン")
+
+    def test_outside_party_is_ignored(self):
+        self.assertIsNone(self.rec.fit_to_party("opp", "ミミッキュ", 1.0, ["ミミッキュ"])[0])
+
+    def test_unknown_slot_allows_clear_read(self):
+        self.st.parties["opp"] = ["Charizard", "Armarouge", "icon:b1_3", "Sinistcha"]
+        self.assertEqual(self.rec.fit_to_party("opp", "ミミッキュ", 1.0, ["ミミッキュ"])[0], "ミミッキュ")
+
+    def test_nickname_left_alone(self):
+        self.assertEqual(self.rec.fit_to_party("me", None, 0.0, ["山田二郎"]), (None, 0.0))
+
+    def test_no_party_no_change(self):
+        self.st.parties["opp"] = []
+        self.assertEqual(self.rec.fit_to_party("opp", "ミミッキュ", 1.0, ["ミミッキュ"])[0], "ミミッキュ")

@@ -17,8 +17,8 @@ from .champ_icons import ChampionIcons
 from .icons import ICON_DIR, IconDB, crop_with_margin
 from .gender import crop as crop_rect
 from .gender import detect_gender
-from .names import (NameMatcher, base_stats, form_abilities_ja, gender_variant, is_mega, mega_forms, normalize,
-                    resolve, type_name_ja, types_of, with_gender)
+from .names import (NameMatcher, base_stats, form_abilities_ja, gender_variant, is_mega, loose, mega_forms,
+                    normalize, resolve, type_name_ja, types_of, with_gender)
 from .nicknames import NicknameDB, clean_nick, looks_like_name, nick_key
 from .type_icons import TypeIcons
 from .ocr import create_ocr, preprocess
@@ -796,6 +796,7 @@ class Recognizer(threading.Thread):
             if read is None:
                 continue
             species, score, texts, text = read
+            species, score = self.fit_to_party(r.get("side", "opp"), species, score, texts)
             hint, via = None, "name"
             if not species and texts and looks_like_name(text):
                 # ポケモン名ではない = ニックネーム。登録済みならそれ、無ければ顔画像で判定
@@ -874,6 +875,53 @@ class Recognizer(threading.Thread):
         if scored and (len(scored) < 2 or scored[0][0] - scored[1][0] >= 0.05):
             st.label_icon(scored[0][1], key)
             log.info("対戦に出てきた %s を、絵の似ている未登録アイコンとして登録 (%.2f)", info["display"], scored[0][0])
+
+    def fit_to_party(self, side, species, score, texts):
+        """対戦画面で読んだ名前を、選出画面で分かったパーティに合わせる (カードにパーティ以外のポケモンを出さない)。
+
+        - 読めたポケモンがパーティにいればそのまま
+        - いなければ、読めた文字にいちばん近いパーティのポケモン (「プレンアルマ」→ グレンアルマ)
+        - パーティにまだ分からない枠 (相手の「?」・推定、自分のニックネーム) があるときだけ、
+          はっきり読めた (0.95 以上) パーティ外のポケモンを認める (その枠のポケモンのはず)
+        - それ以外は読まなかったことにする
+        パーティが分からない (選出画面を見ていない) ときは何もしない。"""
+        usage = self.state.usage
+        party = self.state.parties.get(side) or []
+        if len(party) < 3:
+            return species, score
+        guessed = set()
+        if side == "opp":
+            guessed = {resolve(g["guess"], usage).get("species") for g in self.state.icon_guess.values() if g.get("guess")}
+        known = {resolve(m, usage).get("species") for m in party if not m.startswith(("icon:", "nick:"))} - {None}
+        if species and species in known:
+            return species, score
+        text = " / ".join(texts or [])
+        if not species and text:
+            if self.state.nicknames.match(text):
+                return species, score  # 登録済みのニックネーム → いつもの処理に任せる
+            k = nick_key(text)
+            for m in party:  # まだ何のポケモンか分からない自分のニックネーム
+                if m.startswith("nick:") and difflib.SequenceMatcher(None, k, nick_key(m[5:])).ratio() >= 0.7:
+                    return species, score
+        best, best_r = None, 0.0
+        for t in texts or []:
+            nt = normalize(t)
+            if len(nt) < 2:
+                continue
+            for sp in known:
+                ns = normalize(sp)
+                r = max(difflib.SequenceMatcher(None, nt, ns).ratio(),
+                        difflib.SequenceMatcher(None, loose(nt), loose(ns)).ratio() * 0.97)
+                if r > best_r:
+                    best, best_r = sp, r
+        if best and best_r >= 0.6 and not (species and score >= 0.95 and best_r < 0.8):
+            return best, max(0.85, min(score, 0.9))
+        unsettled = any(m.startswith(("icon:", "nick:")) for m in party) or bool(guessed & known)
+        if species and unsettled and score >= 0.95:
+            return species, score
+        if species:
+            log.info("%s側: パーティにいない %s を読んだので無視 (%r)", "相手" if side == "opp" else "自分", species, text)
+        return None, 0.0
 
     def read_region(self, frame, r, scale):
         """対戦画面の名前欄を読む。戻り値: (種族 or None, スコア, 読めた文字列のリスト, つないだ文字列) / 範囲が小さすぎれば None"""
